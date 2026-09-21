@@ -1,11 +1,14 @@
 ﻿using Newtonsoft.Json;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.IO;
 using System.Linq;
 using System.Media;
 using System.Net.Http;
+using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Timers;
 using System.Windows.Forms;
@@ -38,18 +41,48 @@ namespace ATISPlugin
 
         private static EditorWindow Editor;
 
-        public static string ProfileName()
-        {
-            if (Profile.Name.Contains("Australia")) return "Australia";
-            else if (Profile.Name.Contains("South Pacific")) return "South Pacific";
-            else if (Profile.Name.Contains("Pacific")) return "Pacific";
-            else if (Profile.Name.Contains("Combined Oceanic")) return "VATNZ Combined Oceanic";
-            else if (Profile.Name.Contains("VATNZ")) return "New Zealand";
-            else if (Profile.Name.Contains("México")) return "Mexico";
-            else return string.Empty;
-        }
         public static readonly string ManualVoiceName = "Manual Recording";
-        public static string DatasetPath => Path.Combine(Helpers.GetFilesFolder(), "Profiles", ProfileName());
+        public static string DatasetPath => VatSysDatasetPath;
+
+        private static string vatSysDatasetPath;
+        private static bool vatSysDatasetPathChecked;
+
+        private static string VatSysDatasetPath
+        {
+            get
+            {
+                if (vatSysDatasetPathChecked) return vatSysDatasetPath;
+
+                vatSysDatasetPathChecked = true;
+
+                try
+                {
+                    var settingsType = typeof(vatsys.ATIS).Assembly.GetType("vatsys.Properties.Settings");
+                    var settings = settingsType?.GetProperty("Default")?.GetValue(null);
+                    var path = settings == null ? null : settingsType.GetProperty("DatasetPath")?.GetValue(settings) as string;
+
+                    if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path)) vatSysDatasetPath = path;
+                }
+                catch { }
+
+                return vatSysDatasetPath;
+            }
+        }
+        // Tower and below may only operate a single ATIS.
+        public static bool SingleATISOnly
+        {
+            get
+            {
+                if (!Network.IsConnected) return false;
+
+                var callsign = Network.Callsign;
+
+                if (string.IsNullOrWhiteSpace(callsign)) return false;
+
+                return callsign.EndsWith("_DEL") || callsign.EndsWith("_GND") || callsign.EndsWith("_TWR");
+            }
+        }
+
         public static ATIS ATISData { get; set; }
         public static List<ZuluInfo> ZuluInfo { get; set; } = new List<ZuluInfo>();
         public static List<OFCWInfo> OFCWInfo { get; set; } = new List<OFCWInfo>();
@@ -58,13 +91,19 @@ namespace ATISPlugin
 
         public static SoundPlayer SoundPlayer { get; set; } = new SoundPlayer();
         private static Timer BroadcastTimer { get; set; } = new Timer();
-        public static List<ATISAudio> ToBroadcast { get; set; } = new List<ATISAudio>();
+        public static ConcurrentQueue<ATISAudio> ToBroadcast { get; } = new ConcurrentQueue<ATISAudio>();
+
+        // vatSys encodes bot audio with a single shared Opus encoder that is not
+        // thread safe, so only one upload may run at a time. Overlapping uploads
+        // corrupt the encoder until vatSys is restarted.
+        private static readonly SemaphoreSlim BroadcastLock = new SemaphoreSlim(1, 1);
 
         public static List<VSCSFrequency> Frequencies { get; set; } = new List<VSCSFrequency>();
 
         public Plugin()
         {
-            if (ProfileName() == string.Empty) return;
+            // Stay inactive on profiles without an ATIS.xml in their dataset.
+            if (!File.Exists(Path.Combine(DatasetPath, "ATIS.xml"))) return;
 
             vatsys.ATIS.Disable();
 
@@ -81,35 +120,12 @@ namespace ATISPlugin
                 ATISMenu.Item.Click += ATISMenu_Click;
                 MMI.AddCustomMenuItem(ATISMenu);
 
-                if (!Directory.Exists(DatasetPath))
-                {
-                    Errors.Add(new Exception("Could not find profile."), DisplayName);
-                    return;
-                }
-
                 GetData();
 
                 if (ATISData == null)
                 {
                     Errors.Add(new Exception("Could not load ATIS data."), DisplayName);
                     return;
-                }
-
-                var directory = Path.Combine(DatasetPath, "Temp");
-
-                if (!Directory.Exists(directory))
-                {
-                    Directory.CreateDirectory(directory);
-                }
-
-                var toDelete = Directory
-                    .EnumerateFiles(directory, "*.*", SearchOption.TopDirectoryOnly)
-                    .Where(s => Path.GetExtension(s).TrimStart('.').ToLowerInvariant() == "wav");
-
-                foreach (var file in toDelete)
-                {
-                    if (file.Contains("AIS.wav")) continue;
-                    File.Delete(file);
                 }
 
                 ATIS1 = new ATISControl(1);
@@ -248,31 +264,99 @@ namespace ATISPlugin
             }
         }
 
+        // Dispatch queued audio without waiting for the next poll, so the
+        // broadcast starts close to the time the timecheck was spoken for.
+        public static void BroadcastNow()
+        {
+            BroadcastTimer.Stop();
+            BroadcastTimer.Interval = 250;
+            BroadcastTimer.Start();
+        }
+
         private async void BroadcastTimer_Elasped(object sender, ElapsedEventArgs e)
         {
-            var toBroadcast = ToBroadcast.ToList();
+            // BroadcastNow can fire this handler while an earlier one is still
+            // uploading, so wait for it to finish rather than running alongside it.
+            await BroadcastLock.WaitAsync();
 
-            foreach (var atb in toBroadcast)
+            try
             {
-                var atis = ToBroadcast.FirstOrDefault(x => x.Id == atb.Id);
-
-                if (atis != null) ToBroadcast.Remove(atis);
-
-                if (!Network.IsOfficialServer) continue;
-
-                if (!Network.GetATISConnected(atb.ATISIndex)) continue;
-
-                try
+                while (ToBroadcast.TryDequeue(out var atb))
                 {
-                    await AFV.AddOrUpdateATISBot(atb.Audio, atb.ATISIndex, atb.Callsign, atb.Frequency, atb.VisPoint, atb.Duration);
-                }
-                catch (Exception ex)
-                {
-                    Errors.Add(new Exception($"Could not start voice ATIS: {ex.Message}"), DisplayName);
+                    if (!Network.IsOfficialServer) continue;
+
+                    if (!Network.GetATISConnected(atb.ATISIndex)) continue;
+
+                    try
+                    {
+                        await StartVoiceATIS(atb);
+                    }
+                    catch (Exception ex)
+                    {
+                        Errors.Add(new Exception($"Could not start voice ATIS: {ex.Message}"), DisplayName);
+                    }
                 }
             }
+            finally
+            {
+                BroadcastLock.Release();
+            }
+
+            // Audio queued while this handler was finishing must not wait for the slow poll.
+            BroadcastTimer.Interval = ToBroadcast.IsEmpty ? TimeSpan.FromSeconds(5).TotalMilliseconds : 250;
 
             BroadcastTimer.Start();
+        }
+
+        private static async Task StartVoiceATIS(ATISAudio atb)
+        {
+            try
+            {
+                await AFV.AddOrUpdateATISBot(atb.Audio, atb.ATISIndex, atb.Callsign, atb.Frequency, atb.VisPoint, atb.Duration);
+            }
+            catch (Exception ex) when (IsEncoderFault(ex) && ResetEncoder())
+            {
+                // A corrupted encoder fails every upload until vatSys is restarted,
+                // so try again on the replacement.
+                await AFV.AddOrUpdateATISBot(atb.Audio, atb.ATISIndex, atb.Callsign, atb.Frequency, atb.VisPoint, atb.Duration);
+            }
+        }
+
+        // Network and validation errors are thrown elsewhere in vatSys, only a
+        // corrupted encoder throws from inside the encoding itself.
+        private static bool IsEncoderFault(Exception ex)
+        {
+            return !(ex is TimeoutException) && ex.StackTrace != null && ex.StackTrace.Contains("BotHelper2");
+        }
+
+        // Swap the shared Opus encoder in vatSys for a new one. Must only be
+        // called while holding the BroadcastLock.
+        private static bool ResetEncoder()
+        {
+            try
+            {
+                var helper = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(x => x.GetName().Name == "GeoVR.Connection.BotHelper2")?
+                    .GetType("GeoVR.Connection.BotHelper2");
+
+                var field = helper?.GetField("opusEncoder", BindingFlags.NonPublic | BindingFlags.Static);
+
+                if (field == null || field.IsInitOnly) return false;
+
+                var constructor = field.FieldType.GetConstructors().FirstOrDefault(x => x.GetParameters().Length == 3);
+
+                if (constructor == null) return false;
+
+                var application = Enum.Parse(constructor.GetParameters()[2].ParameterType, "OPUS_APPLICATION_VOIP");
+
+                field.SetValue(null, constructor.Invoke(new object[] { 48000, 1, application }));
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void Audio_VSCSFrequenciesChanged(object sender, EventArgs e)
@@ -300,7 +384,7 @@ namespace ATISPlugin
 
         private async void Network_Disconnected(object sender, EventArgs e)
         {
-            ToBroadcast.Clear();
+            while (ToBroadcast.TryDequeue(out _)) { }
             
             await ATIS1?.Delete();
             await ATIS2?.Delete();
@@ -401,7 +485,13 @@ namespace ATISPlugin
 
             try
             {
-                MMI.InvokeOnGUI(delegate () { Editor.Show(mainForm); });
+                MMI.InvokeOnGUI(delegate ()
+                {
+                    Editor.Show(mainForm);
+
+                    // Connection state may have changed while the window was closed.
+                    Editor.RefreshEvent?.Invoke(null, null);
+                });
             }
             catch { }
         }

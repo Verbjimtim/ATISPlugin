@@ -74,14 +74,14 @@ namespace ATISPlugin
 
                     if (wind.EndsWith("01") || wind.EndsWith("02") || wind.EndsWith("03"))
                     {
-                        Wind = "VRB";
+                        Wind = "LIGHT AND VRB";
 
                         continue;
                     }
 
                     var direction = wind.Substring(0, 3);
 
-                    var speed = wind.Substring(3, 2);
+                    var speed = wind.Substring(3, 2).TrimStart('0');
 
                     Wind = $"{direction}/{speed}";
 
