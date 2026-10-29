@@ -47,12 +47,15 @@ namespace ATISPlugin
         }
         public static readonly string ManualVoiceName = "Manual Recording";
         public static string DatasetPath => Path.Combine(Helpers.GetFilesFolder(), "Profiles", ProfileName());
+        public static string PresetsPath => Path.Combine(DatasetPath, "Plugins", "Configs", "ATISPresets.xml");
         public static ATIS ATISData { get; set; }
+        public static ATISPresets Presets { get; set; } = new ATISPresets();
         public static List<ZuluInfo> ZuluInfo { get; set; } = new List<ZuluInfo>();
         public static List<CodeBlock> CodeBlocks { get; set; } = new List<CodeBlock>();
 
         public static SoundPlayer SoundPlayer { get; set; } = new SoundPlayer();
         private static Timer BroadcastTimer { get; set; } = new Timer();
+        private static Timer TimedUpdatesTimer { get; set; } = new Timer();
         public static List<ATISAudio> ToBroadcast { get; set; } = new List<ATISAudio>();
 
         public static List<VSCSFrequency> Frequencies { get; set; } = new List<VSCSFrequency>();
@@ -124,6 +127,11 @@ namespace ATISPlugin
                 BroadcastTimer.Interval = TimeSpan.FromSeconds(5).TotalMilliseconds;
                 BroadcastTimer.AutoReset = false;
                 BroadcastTimer.Start();
+
+                TimedUpdatesTimer.Elapsed += new ElapsedEventHandler(TimedUpdatesTimer_Elapsed);
+                TimedUpdatesTimer.Interval = TimeSpan.FromMinutes(1).TotalMilliseconds;
+                TimedUpdatesTimer.AutoReset = true;
+                TimedUpdatesTimer.Start();
             }
             catch (Exception ex)
             {
@@ -248,6 +256,24 @@ namespace ATISPlugin
             BroadcastTimer.Start();
         }
 
+        // SFC COND clearing and windshear expiry are time based, so check them every minute.
+        private void TimedUpdatesTimer_Elapsed(object sender, ElapsedEventArgs e)
+        {
+            try
+            {
+                foreach (var atis in new[] { ATIS1, ATIS2, ATIS3, ATIS4 })
+                {
+                    if (atis == null) continue;
+
+                    if (atis.CheckTimedUpdates(DateTime.UtcNow)) OnMETARUpdate(atis.Number, true);
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not check ATIS timed updates: {ex.Message}"), DisplayName);
+            }
+        }
+
         private void Audio_VSCSFrequenciesChanged(object sender, EventArgs e)
         {
             Frequencies.Clear();
@@ -332,6 +358,15 @@ namespace ATISPlugin
         private void GetData()
         {
             ATISData = (ATIS)LoadXML(DatasetPath + "\\ATIS.xml", typeof(ATIS));
+
+            try
+            {
+                Presets = (ATISPresets)LoadXML(PresetsPath, typeof(ATISPresets)) ?? new ATISPresets();
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not load ATIS presets: {ex.InnerException?.Message ?? ex.Message}"), DisplayName);
+            }
         }
 
         public object LoadXML(string filePath, Type type)

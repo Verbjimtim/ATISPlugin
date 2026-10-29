@@ -21,6 +21,8 @@ namespace ATISPlugin
         private int Index => Number - 1;
         private string Callsign { get; set; }
         public char ID { get; set; } = 'Z';
+        public string Mode { get; set; }
+        public bool ModeAutoSelected { get; set; }
         public bool IsZulu { get; set; }
         public string ICAO { get; set; }
         private Coordinate VisPoint { get; set; }
@@ -214,7 +216,11 @@ namespace ATISPlugin
             if (Network.GetATISConnected(Index)) Network.DisconnectATIS(Index);
 
             ICAO = null;
-            ID = 'Z'; 
+            ID = 'Z';
+            Mode = null;
+            PrecipitationLastSeenUtc = null;
+            ModeAutoSelected = false;
+            TimedSuggestionsMade.Clear();
             FrequencyDisplay = null;
             Frequency = 0;
             AliasFrequency = 0;
@@ -253,6 +259,10 @@ namespace ATISPlugin
                 line.Changed = false;
             }
 
+            var surfaceLine = Lines.FirstOrDefault(x => x.Name == SurfaceCondition.Field);
+
+            var wasDry = surfaceLine?.Value == SurfaceCondition.Dry;
+
             foreach (var item in items)
             {
                 var line = Lines.FirstOrDefault(x => x.Name == item.Key);
@@ -266,7 +276,11 @@ namespace ATISPlugin
                 line.Changed = true;
             }
 
+            UpdateSurfaceConditionTracking(surfaceLine, wasDry);
+
             SuggestedLines.Clear();
+
+            TimedSuggestionsMade.Clear();
 
             if (VoiceName != Plugin.ManualVoiceName)
             {
@@ -440,6 +454,9 @@ namespace ATISPlugin
 
                 if (updatedLine == currentLine.Value) continue;
 
+                // The WIND field may carry crosswind and tailwind components added by the editor.
+                if (type == METARField.Wind && updatedLine == Wind.StripComponents(currentLine.Value)) continue;
+
                 var suggestLine = new ATISLine(currentLine.Name, 0, currentLine.Type, currentLine.NameSpoken, currentLine.NumbersGrouped, updatedLine, currentLine.METARField);
 
                 suggestedLines.Add(suggestLine);
@@ -483,9 +500,85 @@ namespace ATISPlugin
                 }
             }
 
-            SuggestedLines = suggestedLines;
+            if (SurfaceCondition.FromWeather(updatedLines.Weather) != null) PrecipitationLastSeenUtc = DateTime.UtcNow;
 
-            if (!SuggestedLines.Any()) return false;
+            // Keep any timed suggestions (SFC COND, SIGWX), as they don't come from the METAR.
+            SuggestedLines = SuggestedLines.Where(x => x.METARField == METARField.None).Concat(suggestedLines).ToList();
+
+            if (!suggestedLines.Any()) return false;
+
+            return true;
+        }
+
+        // When precipitation was last reported, for clearing SFC COND.
+        public DateTime? PrecipitationLastSeenUtc { get; set; }
+
+        private readonly HashSet<string> TimedSuggestionsMade = new HashSet<string>();
+
+        private void UpdateSurfaceConditionTracking(ATISLine surfaceLine, bool wasDry)
+        {
+            if (surfaceLine == null) return;
+
+            // DRY goes out on one ATIS only, then the field is cleared.
+            if (wasDry && !surfaceLine.Changed)
+            {
+                surfaceLine.Value = string.Empty;
+                surfaceLine.Changed = true;
+            }
+
+            var weatherLine = Lines.FirstOrDefault(x => x.METARField == METARField.Weather);
+
+            if (SurfaceCondition.Rank(surfaceLine.Value) == 0)
+            {
+                PrecipitationLastSeenUtc = null;
+            }
+            else if (surfaceLine.Changed || SurfaceCondition.FromWeather(weatherLine?.Value) != null)
+            {
+                // Newly reported (even if set by hand), or still precipitating.
+                PrecipitationLastSeenUtc = DateTime.UtcNow;
+            }
+        }
+
+        // Suggests time based changes: SFC COND to DRY once the condition has had time to clear, and removing
+        // windshear reported over an hour ago from SIGWX. Each is suggested once until the next save.
+        public bool CheckTimedUpdates(DateTime utcNow)
+        {
+            if (ICAO == null || IsZulu) return false;
+
+            var added = false;
+
+            var surfaceLine = Lines.FirstOrDefault(x => x.Name == SurfaceCondition.Field);
+            var weatherLine = Lines.FirstOrDefault(x => x.METARField == METARField.Weather);
+
+            if (SurfaceCondition.FromWeather(weatherLine?.Value) != null) PrecipitationLastSeenUtc = utcNow;
+
+            var clearAfter = SurfaceCondition.ClearAfter(surfaceLine?.Value);
+
+            if (clearAfter != null && PrecipitationLastSeenUtc != null && utcNow - PrecipitationLastSeenUtc.Value >= clearAfter.Value)
+            {
+                added |= SuggestTimed(surfaceLine, SurfaceCondition.Dry);
+            }
+
+            var windshearLine = Lines.FirstOrDefault(x => x.Name == Windshear.Field);
+
+            var windshear = windshearLine == null ? null : Windshear.RemoveExpired(windshearLine.Value, utcNow);
+
+            if (windshear != null) added |= SuggestTimed(windshearLine, windshear);
+
+            return added;
+        }
+
+        private bool SuggestTimed(ATISLine line, string value)
+        {
+            var key = $"{line.Name}={value}";
+
+            if (TimedSuggestionsMade.Contains(key)) return false;
+
+            TimedSuggestionsMade.Add(key);
+
+            SuggestedLines.RemoveAll(x => x.Name == line.Name);
+
+            SuggestedLines.Add(new ATISLine(line.Name, 0, line.Type, line.NameSpoken, line.NumbersGrouped, value, line.METARField));
 
             return true;
         }

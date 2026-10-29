@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Speech.Synthesis;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using vatsys;
@@ -27,9 +28,13 @@ namespace ATISPlugin
         private Airspace2.Airport Airport => Airspace2.GetAirport(ICAO);
         public int Number { get; private set; } = 1;
         private Dictionary<string, string> Saves { get; set; } = new Dictionary<string, string>();
+        private string Mode { get; set; }
+        private PresetAirport PresetAirport => ICAO == null ? null : Plugin.Presets.GetAirport(ICAO);
+        private Dictionary<int, PresetButton> PresetButtons { get; set; } = new Dictionary<int, PresetButton>();
         private bool Edits => Saves.Any() || 
             TimeCheck != Control.TimeCheck || 
             ID != Control.ID || 
+            Mode != Control.Mode || 
             Control.PromptRate != Rate || 
             Control.VoiceName != VoiceName;
         private bool TimeCheck { get; set; }
@@ -62,6 +67,12 @@ namespace ATISPlugin
             ComboBoxLetter.FocusColor = Colours.GetColour(Colours.Identities.HighlightedText);
             ComboBoxLetter.Font = MMI.eurofont_winsml;
 
+            // Read only, so set the colours explicitly to match the editable fields.
+            TextBoxMode.BackColor = TextBox1.BackColor;
+            TextBoxMode.ForeColor = TextBox1.ForeColor;
+
+            CreatePresetButtons();
+
             Initialized = true;
 
             RefreshEvent += OnRefreshEvent;
@@ -76,6 +87,8 @@ namespace ATISPlugin
                 ICAO = Control.ICAO;
 
                 ID = Control.ID;
+
+                Mode = Control.Mode;
 
                 TimeCheck = Control.TimeCheck;
 
@@ -178,6 +191,278 @@ namespace ATISPlugin
             ComboBoxLetter.SelectedIndex = 0;
         }
 
+        private List<PresetMode> Modes { get; set; } = new List<PresetMode>();
+
+        private IEnumerable<string> GetRunwayNames()
+        {
+            if (Airport == null) return Enumerable.Empty<string>();
+
+            return Airport.Runways
+                .Select(x => x.Name.ToString().PadLeft(2, '0'))
+                .Where(x => Regex.IsMatch(x, "^\\d{2}[LRC]?$"))
+                .Distinct()
+                .OrderBy(x => x);
+        }
+
+        // Runways named in the RWY field being edited, e.g. 34L and 34R from "34L AND R FOR ARRS AND DEPS".
+        private List<string> GetRunwaysInUse()
+        {
+            var runwayLine = Control.Lines.FirstOrDefault(x => x.Name == "RWY");
+
+            var runwayBox = runwayLine == null ? null : GetTextBox(runwayLine.Number);
+
+            return runwayBox == null ? new List<string>() : Wind.RunwaysInUse(runwayBox.Text);
+        }
+
+        private void LoadModes()
+        {
+            Modes = PresetAirport?.GetModes(GetRunwayNames()) ?? new List<PresetMode>();
+
+            RefreshForm_Presets();
+        }
+
+        private bool IsMultiple(string fieldName) => PresetAirport != null && PresetAirport.IsMultiple(fieldName);
+
+        // Options for a field's arrow button: built in SFC COND options, then presets from ATISPresets.xml.
+        private List<string> GetOptions(ATISLine line)
+        {
+            var options = new List<string>();
+
+            if (line.Name == SurfaceCondition.Field)
+            {
+                var saved = PresetAirport.Clean(line.Value);
+
+                // DRY is only reported after the runway was last reported as something else.
+                if (!string.IsNullOrEmpty(saved) && saved != SurfaceCondition.Dry) options.Add(SurfaceCondition.Dry);
+
+                options.AddRange(SurfaceCondition.Conditions.Reverse());
+
+                if (saved == SurfaceCondition.Dry) options.Add(string.Empty);
+            }
+
+            if (PresetAirport != null)
+            {
+                options.AddRange(PresetAirport.GetPresets(line.Name, Modes, Mode).Where(x => !options.Contains(x)));
+            }
+
+            return options;
+        }
+
+        // Raises SFC COND to match the precipitation in WX. Never lowers it, as the runway stays wet after
+        // the rain stops; ATISControl suggests DRY once the condition has had time to clear.
+        private void UpdateSurfaceCondition()
+        {
+            if (Control.IsZulu) return;
+
+            var weatherLine = Control.Lines.FirstOrDefault(x => x.METARField == METARField.Weather);
+            var surfaceLine = Control.Lines.FirstOrDefault(x => x.Name == SurfaceCondition.Field);
+
+            var weatherBox = weatherLine == null ? null : GetTextBox(weatherLine.Number);
+            var surfaceBox = surfaceLine == null ? null : GetTextBox(surfaceLine.Number);
+
+            if (weatherBox == null || surfaceBox == null) return;
+
+            var condition = SurfaceCondition.FromWeather(weatherBox.Text);
+
+            if (condition == null) return;
+
+            if (SurfaceCondition.Rank(condition) <= SurfaceCondition.Rank(surfaceBox.Text)) return;
+
+            surfaceBox.Text = condition;
+        }
+
+        // Shows the arrow button only on fields with presets for the selected mode, and greys it out
+        // when there's nothing to choose between (a single option that replaces the field).
+        private void RefreshForm_PresetButtons(bool enabled)
+        {
+            foreach (var presetButton in PresetButtons)
+            {
+                var textBox = GetTextBox(presetButton.Key);
+
+                var line = Control.Lines.FirstOrDefault(x => x.Number == presetButton.Key);
+
+                var presets = line == null ? new List<string>() : GetOptions(line);
+
+                var hasPresets = presets.Any();
+
+                presetButton.Value.Tag = hasPresets ? line.Name : null;
+
+                presetButton.Value.Enabled = enabled && (presets.Count > 1 || (hasPresets && (IsMultiple(line.Name) || Template.IsTemplate(presets[0]))));
+
+                var width = hasPresets ? TextBoxWidth - PresetButtonWidth - 4 : TextBoxWidth;
+
+                if (textBox.Width != width) textBox.Width = width;
+            }
+        }
+
+        private const int TextBoxWidth = 492;
+        private const int PresetButtonWidth = 26;
+        private ContextMenuStrip FieldMenu;
+        private PresetButton ButtonMode;
+
+        private void CreatePresetButtons()
+        {
+            FieldMenu = PresetMenu.Create(ComboBoxLetter.MenuRenderer);
+
+            TextBoxMode.Width = TextBoxWidth - PresetButtonWidth - 4;
+
+            ButtonMode = new PresetButton
+            {
+                Name = "ButtonMode",
+                Location = new System.Drawing.Point(TextBoxMode.Left + TextBoxWidth - PresetButtonWidth, TextBoxMode.Top),
+                Size = new System.Drawing.Size(PresetButtonWidth, TextBoxMode.Height)
+            };
+
+            ButtonMode.Click += (s, e) => ShowModeMenu();
+
+            Controls.Add(ButtonMode);
+
+            for (int number = 1; number <= 12; number++)
+            {
+                var textBox = GetTextBox(number);
+
+                var button = new PresetButton
+                {
+                    Name = $"ButtonPreset{number}",
+                    Location = new System.Drawing.Point(textBox.Left + TextBoxWidth - PresetButtonWidth, textBox.Top),
+                    Size = new System.Drawing.Size(PresetButtonWidth, textBox.Height),
+                    Visible = false
+                };
+
+                var buttonNumber = number;
+
+                button.Click += (s, e) => ShowPresetMenu(buttonNumber);
+
+                Controls.Add(button);
+
+                PresetButtons.Add(number, button);
+            }
+        }
+
+        private TextField GetTextBox(int number)
+        {
+            switch (number)
+            {
+                case 1: return TextBox1;
+                case 2: return TextBox2;
+                case 3: return TextBox3;
+                case 4: return TextBox4;
+                case 5: return TextBox5;
+                case 6: return TextBox6;
+                case 7: return TextBox7;
+                case 8: return TextBox8;
+                case 9: return TextBox9;
+                case 10: return TextBox10;
+                case 11: return TextBox11;
+                case 12: return TextBox12;
+                default: return null;
+            }
+        }
+
+        private void ShowPresetMenu(int number)
+        {
+            var textBox = GetTextBox(number);
+
+            var line = Control.Lines.FirstOrDefault(x => x.Number == number);
+
+            if (textBox == null || line == null || PresetButtons[number].Tag == null) return;
+
+            var multiple = IsMultiple(line.Name);
+
+            FieldMenu.Items.Clear();
+
+            foreach (var preset in GetOptions(line))
+            {
+                if (multiple && string.IsNullOrEmpty(preset)) continue;
+
+                var isTemplate = Template.IsTemplate(preset);
+
+                var item = PresetMenu.Item(
+                    string.IsNullOrEmpty(preset) ? "(BLANK)" : preset,
+                    multiple && !isTemplate && !string.IsNullOrEmpty(preset) && ContainsPreset(textBox.Text, preset));
+
+                item.Click += (s, e) =>
+                {
+                    var value = preset;
+
+                    if (isTemplate)
+                    {
+                        // Windshear is reported on a runway in use; a runway change can be to any runway.
+                        var runways = line.Name == Windshear.Field ? GetRunwaysInUse() : GetRunwayNames().ToList();
+
+                        if (!runways.Any()) runways = GetRunwayNames().ToList();
+
+                        var defaults = PresetAirport?.Defaults.ToDictionary(x => x.Name, x => x.Value) ?? new Dictionary<string, string>();
+
+                        using (var templateWindow = new TemplateWindow(preset, runways, defaults, ComboBoxLetter.MenuRenderer))
+                        {
+                            if (templateWindow.ShowDialog(this) != DialogResult.OK) return;
+
+                            value = templateWindow.Result;
+                        }
+                    }
+
+                    textBox.Text = multiple ? TogglePreset(textBox.Text, value) : value;
+                };
+
+                FieldMenu.Items.Add(item);
+            }
+
+            FieldMenu.Show(textBox, new System.Drawing.Point(0, textBox.Height));
+        }
+
+        private void ShowModeMenu()
+        {
+            if (!ButtonMode.Enabled) return;
+
+            FieldMenu.Items.Clear();
+
+            // Best first for the current wind and weather, when there's a METAR to judge by.
+            var ordered = string.IsNullOrWhiteSpace(Control.METARRaw)
+                ? Modes
+                : RunwaySelection.Rank(Modes, GetRunwayConditions(), RunwayHeading).Select(x => x.Mode).ToList();
+
+            foreach (var name in new[] { (string)null }.Concat(ordered.Select(x => x.Name)))
+            {
+                var item = PresetMenu.Item(name ?? "(NONE)");
+
+                item.Click += (s, e) => SelectMode(name);
+
+                FieldMenu.Items.Add(item);
+            }
+
+            FieldMenu.Show(TextBoxMode, new System.Drawing.Point(0, TextBoxMode.Height));
+        }
+
+        private void TextBoxMode_MouseUp(object sender, MouseEventArgs e)
+        {
+            ShowModeMenu();
+        }
+
+        private static bool ContainsPreset(string text, string preset) =>
+            (text ?? string.Empty).IndexOf(preset, StringComparison.OrdinalIgnoreCase) >= 0;
+
+        // Adds the preset to the end of the field, or removes it if it's already there.
+        private static string TogglePreset(string text, string preset)
+        {
+            var current = (text ?? string.Empty).Trim();
+
+            if (string.IsNullOrEmpty(preset)) return current;
+
+            var index = current.IndexOf(preset, StringComparison.OrdinalIgnoreCase);
+
+            if (index < 0)
+            {
+                return string.IsNullOrEmpty(current) ? preset : $"{current.TrimEnd('.', ' ')}. {preset}";
+            }
+
+            current = current.Remove(index, preset.Length);
+            current = Regex.Replace(current, "(\\s*\\.\\s*){2,}", ". ");
+            current = Regex.Replace(current, "^[\\s\\.]+|[\\s\\.]+$", "");
+
+            return current;
+        }
+
         private void LoadOptions()
         {
             LoadRunways();
@@ -201,6 +486,8 @@ namespace ATISPlugin
             }
 
             LoadCodes();
+
+            LoadModes();
 
             ComboBoxVoice.Items.Clear();
 
@@ -284,8 +571,6 @@ namespace ATISPlugin
                     ButtonZulu.Visible = true;
                 }
 
-                LabelMETAR.Text = string.Empty;
-
                 if (ICAO == null)
                 {
                     ComboBoxAirport.SelectedIndex = ComboBoxAirport.Items.IndexOf("");
@@ -298,6 +583,8 @@ namespace ATISPlugin
                 }
 
                 ComboBoxLetter.SelectedIndex = ComboBoxLetter.Items.IndexOf(ID.ToString());
+
+                SetText(TextBoxMode, Mode);
 
                 if (VoiceName != null)
                 {
@@ -339,7 +626,180 @@ namespace ATISPlugin
                     RefreshForm_NotConnected();
                 }
 
+                RefreshForm_Presets();
+
+                AutoSelectMode();
+
             }));
+        }
+
+        // Current weather for ranking runway modes: the METAR, plus SFC COND for a wet runway.
+        private RunwaySelection.Conditions GetRunwayConditions()
+        {
+            var surfaceLine = Control.Lines.FirstOrDefault(x => x.Name == SurfaceCondition.Field);
+
+            var surfaceBox = surfaceLine == null ? null : GetTextBox(surfaceLine.Number);
+
+            var wet = surfaceBox != null && SurfaceCondition.Rank(surfaceBox.Text) > 0;
+
+            return RunwaySelection.FromMetar(Control.METARRaw, wet);
+        }
+
+        private double RunwayHeading(string runway) => GetRunwayHeading(runway) ?? int.Parse(runway.Substring(0, 2)) * 10;
+
+        // Picks the best runway mode the first time the ATIS has a METAR, once only per ATIS.
+        private void AutoSelectMode()
+        {
+            if (Control.ICAO == null || Control.IsZulu || Control.ModeAutoSelected) return;
+
+            if (string.IsNullOrWhiteSpace(Control.METARRaw) || !Network.IsConnected) return;
+
+            Control.ModeAutoSelected = true;
+
+            if (Mode != null || Control.Mode != null || !Modes.Any()) return;
+
+            var best = RunwaySelection.Best(Modes, GetRunwayConditions(), RunwayHeading);
+
+            if (best != null) SelectMode(best.Name);
+        }
+
+        private void RefreshForm_Presets()
+        {
+            var visible = !Control.IsZulu;
+
+            var enabled = visible && Network.IsConnected && Control.ICAO != null;
+
+            TextBoxMode.Enabled = enabled;
+
+            // Prompt the controller to pick a runway mode first.
+            if (enabled && string.IsNullOrWhiteSpace(Mode))
+            {
+                LabelMode.ForeColor = Colours.GetColour(Colours.Identities.Warning);
+            }
+            else
+            {
+                LabelMode.ForeColor = Colours.GetColour(Colours.Identities.InteractiveText);
+            }
+
+            ButtonMode.Enabled = enabled;
+
+            RefreshForm_PresetButtons(enabled);
+
+            RefreshForm_Layout();
+        }
+
+        private const int RowTop = 229;
+        private const int RowHeight = 31;
+        private int? WindowChrome { get; set; }
+
+        // Stacks the rows that are in use (MODE only when the airport has modes, then one row per ATIS line)
+        // and sizes the window to fit.
+        private void RefreshForm_Layout()
+        {
+            SuspendLayout();
+
+            var y = RowTop;
+
+            var showMode = !Control.IsZulu && Modes.Any();
+
+            LabelMode.Visible = showMode;
+            TextBoxMode.Visible = showMode;
+            ButtonMode.Visible = showMode;
+
+            if (showMode)
+            {
+                LabelMode.Location = new System.Drawing.Point(8, y + 3);
+                TextBoxMode.Location = new System.Drawing.Point(172, y);
+                ButtonMode.Location = new System.Drawing.Point(172 + TextBoxWidth - PresetButtonWidth, y);
+                y += RowHeight;
+            }
+
+            var rows = Control.Lines.Count(x => x.Number <= 12 && x.Name != "ZULU");
+
+            for (int number = 1; number <= 12; number++)
+            {
+                var textBox = GetTextBox(number);
+                var label = GetLabel(number);
+                var button = PresetButtons[number];
+
+                var inUse = number <= rows && !Control.IsZulu;
+
+                textBox.Visible = inUse;
+                label.Visible = inUse;
+                button.Visible = inUse && button.Tag != null;
+
+                if (!inUse) continue;
+
+                label.Location = new System.Drawing.Point(8, y + 3);
+                textBox.Location = new System.Drawing.Point(172, y);
+                button.Location = new System.Drawing.Point(172 + TextBoxWidth - PresetButtonWidth, y);
+                button.Height = textBox.Height;
+
+                y += RowHeight;
+            }
+
+            if (Control.IsZulu)
+            {
+                TextBoxZulu.Location = new System.Drawing.Point(172, y + 1);
+                TextBoxZulu.Height = rows * RowHeight - 7;
+                y += rows * RowHeight;
+            }
+
+            ComboBoxTimeCheck.Location = new System.Drawing.Point(172, y - 1);
+            LabelTimeCheck.Location = new System.Drawing.Point(78, y + 3);
+            ComboBoxZuluFrequency.Location = new System.Drawing.Point(172, y - 1);
+            LabelFrequency.Location = new System.Drawing.Point(86, y + 3);
+
+            y += RowHeight;
+
+            ButtonSave.Location = new System.Drawing.Point(172, y - 1);
+            ButtonCancel.Location = new System.Drawing.Point(423, y - 1);
+
+            y += 50;
+
+            ComboBoxRunway.Location = new System.Drawing.Point(172, y - 1);
+            LabelWindCalculator.Location = new System.Drawing.Point(6, y + 2);
+            LabelWindComponents.Location = new System.Drawing.Point(338, y + 2);
+
+            var clientHeight = y - 1 + 41;
+
+            ResumeLayout();
+
+            if (WindowChrome == null)
+            {
+                var chrome = Height - ClientSize.Height;
+                WindowChrome = chrome > 0 ? chrome : 28;
+            }
+
+            var height = clientHeight + WindowChrome.Value;
+
+            if (Height == height) return;
+
+            MinimumSize = System.Drawing.Size.Empty;
+            MaximumSize = System.Drawing.Size.Empty;
+            Height = height;
+            MinimumSize = new System.Drawing.Size(Width, height);
+            MaximumSize = new System.Drawing.Size(Width, height);
+        }
+
+        private Label GetLabel(int number)
+        {
+            switch (number)
+            {
+                case 1: return Label1;
+                case 2: return Label2;
+                case 3: return Label3;
+                case 4: return Label4;
+                case 5: return Label5;
+                case 6: return Label6;
+                case 7: return Label7;
+                case 8: return Label8;
+                case 9: return Label9;
+                case 10: return Label10;
+                case 11: return Label11;
+                case 12: return Label12;
+                default: return null;
+            }
         }
 
         private void RefreshForm_TopButtons()
@@ -568,19 +1028,50 @@ namespace ATISPlugin
             TextBox12.Enabled = true;
             TextBoxZulu.Enabled = true;
 
+            TextBox1.TextChanged -= TextBox_TextChanged;
             TextBox1.TextChanged += TextBox_TextChanged;
+            TextBox2.TextChanged -= TextBox_TextChanged;
             TextBox2.TextChanged += TextBox_TextChanged;
+            TextBox3.TextChanged -= TextBox_TextChanged;
             TextBox3.TextChanged += TextBox_TextChanged;
+            TextBox4.TextChanged -= TextBox_TextChanged;
             TextBox4.TextChanged += TextBox_TextChanged;
+            TextBox5.TextChanged -= TextBox_TextChanged;
             TextBox5.TextChanged += TextBox_TextChanged;
+            TextBox6.TextChanged -= TextBox_TextChanged;
             TextBox6.TextChanged += TextBox_TextChanged;
+            TextBox7.TextChanged -= TextBox_TextChanged;
             TextBox7.TextChanged += TextBox_TextChanged;
+            TextBox8.TextChanged -= TextBox_TextChanged;
             TextBox8.TextChanged += TextBox_TextChanged;
+            TextBox9.TextChanged -= TextBox_TextChanged;
             TextBox9.TextChanged += TextBox_TextChanged;
+            TextBox10.TextChanged -= TextBox_TextChanged;
             TextBox10.TextChanged += TextBox_TextChanged;
+            TextBox11.TextChanged -= TextBox_TextChanged;
             TextBox11.TextChanged += TextBox_TextChanged;
+            TextBox12.TextChanged -= TextBox_TextChanged;
             TextBox12.TextChanged += TextBox_TextChanged;
+            TextBoxZulu.TextChanged -= TextBox_TextChanged;
             TextBoxZulu.TextChanged += TextBox_TextChanged;
+        }
+
+        // Only touch the text when it differs, so the caret and selection aren't reset mid-edit.
+        private static void SetText(TextBox textBox, string value)
+        {
+            if ((textBox.Text ?? string.Empty) == (value ?? string.Empty)) return;
+
+            textBox.Text = value;
+        }
+
+        private void RefreshForm_UnhookTextBoxes()
+        {
+            for (int number = 1; number <= 12; number++)
+            {
+                GetTextBox(number).TextChanged -= TextBox_TextChanged;
+            }
+
+            TextBoxZulu.TextChanged -= TextBox_TextChanged;
         }
 
         private void RefreshForm_DisableTextBoxes()
@@ -634,54 +1125,17 @@ namespace ATISPlugin
             ComboBoxRate.Enabled = true;
             ComboBoxTimeCheck.Enabled = true;
 
-            RefreshForm_DisableTextBoxes();
+            RefreshForm_UnhookTextBoxes();
 
             foreach (var line in Control.Lines)
             {
-                switch (line.Number)
-                {
-                    case 1:
-                        TextBox1.Text = line.Value;
-                        break;
-                    case 2:
-                        TextBox2.Text = line.Value;
-                        break;
-                    case 3:
-                        TextBox3.Text = line.Value;
-                        break;
-                    case 4:
-                        TextBox4.Text = line.Value;
-                        break;
-                    case 5:
-                        TextBox5.Text = line.Value;
-                        break;
-                    case 6:
-                        TextBox6.Text = line.Value;
-                        break;
-                    case 7:
-                        TextBox7.Text = line.Value;
-                        break;
-                    case 8:
-                        TextBox8.Text = line.Value;
-                        break;
-                    case 9:
-                        TextBox9.Text = line.Value;
-                        break;
-                    case 10:
-                        TextBox10.Text = line.Value;
-                        break;
-                    case 11:
-                        TextBox11.Text = line.Value;
-                        break;
-                    case 12:
-                        TextBox12.Text = line.Value;
-                        break;
-                    case 13:
-                        TextBoxZulu.Text = line.Value;
-                        break;
-                    default:
-                        break;
-                }
+                var textBox = line.Number == 13 ? TextBoxZulu : GetTextBox(line.Number);
+
+                if (textBox == null) continue;
+
+                var saveLine = Saves.FirstOrDefault(x => x.Key == line.Name);
+
+                SetText(textBox, saveLine.Key != null ? saveLine.Value : line.Value);
             }
 
             RefreshForm_EnableTextBoxes();
@@ -706,10 +1160,10 @@ namespace ATISPlugin
                 switch (line.Number)
                 {
                     case 1:
-                        if (!string.IsNullOrWhiteSpace(saveLine.Value)) TextBox1.Text = saveLine.Value;
+                        if (saveLine.Key != null) SetText(TextBox1, saveLine.Value);
                         else if (suggestedLine != null)
                         {
-                            TextBox1.Text = suggestedLine.Value;
+                            SetText(TextBox1, suggestedLine.Value);
                             Label1.ForeColor = Colours.GetColour(Colours.Identities.Warning);
                         }
                         else
@@ -718,10 +1172,10 @@ namespace ATISPlugin
                         }
                         break;
                     case 2:
-                        if (!string.IsNullOrWhiteSpace(saveLine.Value)) TextBox2.Text = saveLine.Value;
+                        if (saveLine.Key != null) SetText(TextBox2, saveLine.Value);
                         else if (suggestedLine != null)
                         {
-                            TextBox2.Text = suggestedLine.Value;
+                            SetText(TextBox2, suggestedLine.Value);
                             Label2.ForeColor = Colours.GetColour(Colours.Identities.Warning);
                         }
                         else
@@ -730,10 +1184,10 @@ namespace ATISPlugin
                         }
                         break;
                     case 3:
-                        if (!string.IsNullOrWhiteSpace(saveLine.Value)) TextBox3.Text = saveLine.Value;
+                        if (saveLine.Key != null) SetText(TextBox3, saveLine.Value);
                         else if (suggestedLine != null)
                         {
-                            TextBox3.Text = suggestedLine.Value;
+                            SetText(TextBox3, suggestedLine.Value);
                             Label3.ForeColor = Colours.GetColour(Colours.Identities.Warning);
                         }
                         else
@@ -742,10 +1196,10 @@ namespace ATISPlugin
                         }
                         break;
                     case 4:
-                        if (!string.IsNullOrWhiteSpace(saveLine.Value)) TextBox4.Text = saveLine.Value;
+                        if (saveLine.Key != null) SetText(TextBox4, saveLine.Value);
                         else if (suggestedLine != null)
                         {
-                            TextBox4.Text = suggestedLine.Value;
+                            SetText(TextBox4, suggestedLine.Value);
                             Label4.ForeColor = Colours.GetColour(Colours.Identities.Warning);
                         }
                         else
@@ -754,10 +1208,10 @@ namespace ATISPlugin
                         }
                         break;
                     case 5:
-                        if (!string.IsNullOrWhiteSpace(saveLine.Value)) TextBox5.Text = saveLine.Value;
+                        if (saveLine.Key != null) SetText(TextBox5, saveLine.Value);
                         else if (suggestedLine != null)
                         {
-                            TextBox5.Text = suggestedLine.Value;
+                            SetText(TextBox5, suggestedLine.Value);
                             Label5.ForeColor = Colours.GetColour(Colours.Identities.Warning);
                         }
                         else
@@ -766,10 +1220,10 @@ namespace ATISPlugin
                         }
                         break;
                     case 6:
-                        if (!string.IsNullOrWhiteSpace(saveLine.Value)) TextBox6.Text = saveLine.Value;
+                        if (saveLine.Key != null) SetText(TextBox6, saveLine.Value);
                         else if (suggestedLine != null)
                         {
-                            TextBox6.Text = suggestedLine.Value;
+                            SetText(TextBox6, suggestedLine.Value);
                             Label6.ForeColor = Colours.GetColour(Colours.Identities.Warning);
                         }
                         else
@@ -778,10 +1232,10 @@ namespace ATISPlugin
                         }
                         break;
                     case 7:
-                        if (!string.IsNullOrWhiteSpace(saveLine.Value)) TextBox7.Text = saveLine.Value;
+                        if (saveLine.Key != null) SetText(TextBox7, saveLine.Value);
                         else if (suggestedLine != null)
                         {
-                            TextBox7.Text = suggestedLine.Value;
+                            SetText(TextBox7, suggestedLine.Value);
                             Label7.ForeColor = Colours.GetColour(Colours.Identities.Warning);
                         }
                         else
@@ -790,10 +1244,10 @@ namespace ATISPlugin
                         }
                         break;
                     case 8:
-                        if (!string.IsNullOrWhiteSpace(saveLine.Value)) TextBox8.Text = saveLine.Value;
+                        if (saveLine.Key != null) SetText(TextBox8, saveLine.Value);
                         else if (suggestedLine != null)
                         {
-                            TextBox8.Text = suggestedLine.Value;
+                            SetText(TextBox8, suggestedLine.Value);
                             Label8.ForeColor = Colours.GetColour(Colours.Identities.Warning);
                         }
                         else
@@ -802,10 +1256,10 @@ namespace ATISPlugin
                         }
                         break;
                     case 9:
-                        if (!string.IsNullOrWhiteSpace(saveLine.Value)) TextBox9.Text = saveLine.Value;
+                        if (saveLine.Key != null) SetText(TextBox9, saveLine.Value);
                         else if (suggestedLine != null)
                         {
-                            TextBox9.Text = suggestedLine.Value;
+                            SetText(TextBox9, suggestedLine.Value);
                             Label9.ForeColor = Colours.GetColour(Colours.Identities.Warning);
                         }
                         else
@@ -814,10 +1268,10 @@ namespace ATISPlugin
                         }
                         break;
                     case 10:
-                        if (!string.IsNullOrWhiteSpace(saveLine.Value)) TextBox10.Text = saveLine.Value;
+                        if (saveLine.Key != null) SetText(TextBox10, saveLine.Value);
                         else if (suggestedLine != null)
                         {
-                            TextBox10.Text = suggestedLine.Value;
+                            SetText(TextBox10, suggestedLine.Value);
                             Label10.ForeColor = Colours.GetColour(Colours.Identities.Warning);
                         }
                         else
@@ -826,10 +1280,10 @@ namespace ATISPlugin
                         }
                         break;
                     case 11:
-                        if (!string.IsNullOrWhiteSpace(saveLine.Value)) TextBox11.Text = saveLine.Value;
+                        if (saveLine.Key != null) SetText(TextBox11, saveLine.Value);
                         else if (suggestedLine != null)
                         {
-                            TextBox11.Text = suggestedLine.Value;
+                            SetText(TextBox11, suggestedLine.Value);
                             Label11.ForeColor = Colours.GetColour(Colours.Identities.Warning);
                         }
                         else
@@ -838,10 +1292,10 @@ namespace ATISPlugin
                         }
                         break;
                     case 12:
-                        if (!string.IsNullOrWhiteSpace(saveLine.Value)) TextBox12.Text = saveLine.Value;
+                        if (saveLine.Key != null) SetText(TextBox12, saveLine.Value);
                         else if (suggestedLine != null)
                         {
-                            TextBox12.Text = suggestedLine.Value;
+                            SetText(TextBox12, suggestedLine.Value);
                             Label12.ForeColor = Colours.GetColour(Colours.Identities.Warning);
                         }
                         else
@@ -850,7 +1304,7 @@ namespace ATISPlugin
                         }
                         break;
                     case 13:
-                        if (!string.IsNullOrWhiteSpace(saveLine.Value)) TextBoxZulu.Text = saveLine.Value;
+                        if (saveLine.Key != null) SetText(TextBoxZulu, saveLine.Value);
                         break;
                     default:
                         break;
@@ -1081,12 +1535,16 @@ namespace ATISPlugin
 
                 LoadCodes();
 
+                LoadModes();
+
                 return;
             }
 
             ICAO = ComboBoxAirport.Items[ComboBoxAirport.SelectedIndex].Substring(0, 4);
 
             LoadCodes();
+
+            LoadModes();
         }
 
         private async void ButtonDelete_Click(object sender, EventArgs e)
@@ -1104,6 +1562,8 @@ namespace ATISPlugin
         private void ButtonCancel_Click(object sender, EventArgs e)
         {
             ID = Control.ID;
+
+            Mode = Control.Mode;
 
             TimeCheck = Control.TimeCheck;
 
@@ -1133,6 +1593,8 @@ namespace ATISPlugin
             Control.VoiceName = VoiceName;
 
             Control.PromptRate = Rate;
+
+            Control.Mode = Mode;
 
             await Control.Save(ID, Saves, TimeCheck);
 
@@ -1216,7 +1678,17 @@ namespace ATISPlugin
 
             if (line == null) return;
 
-            if (line.Value == textBox.Text) return;
+            if (line.METARField == METARField.Weather)
+            {
+                // May set SFC COND, which comes back through here and updates the wind.
+                UpdateSurfaceCondition();
+            }
+
+            if (line.METARField == METARField.Wind || line.Name == "RWY" || line.Name == SurfaceCondition.Field)
+            {
+                // May rewrite the WIND field, which comes back through here to record it.
+                UpdateWindComponents();
+            }
 
             var save = Saves.FirstOrDefault(x => x.Key == line.Name);
 
@@ -1224,6 +1696,9 @@ namespace ATISPlugin
             {
                 Saves.Remove(save.Key);
             }
+
+            // Edited back to the saved value, so there's nothing pending for this line.
+            if ((line.Value ?? string.Empty) == textBox.Text) return;
 
             Saves.Add(line.Name, textBox.Text);
 
@@ -1263,6 +1738,38 @@ namespace ATISPlugin
 
             ButtonSave.Enabled = true;
             ButtonCancel.Enabled = true;
+        }
+
+        private void SelectMode(string selectedMode)
+        {
+            if (selectedMode == Mode) return;
+
+            Mode = selectedMode;
+
+            SetText(TextBoxMode, Mode);
+
+            var mode = Modes.FirstOrDefault(x => x.Name == Mode);
+
+            if (mode != null)
+            {
+                foreach (var field in mode.Fields)
+                {
+                    var line = Control.Lines.FirstOrDefault(x => x.Name == field.Name);
+
+                    if (line == null) continue;
+
+                    var textBox = GetTextBox(line.Number);
+
+                    if (textBox == null) continue;
+
+                    textBox.Text = PresetAirport.Clean(field.Value);
+                }
+            }
+
+            ButtonSave.Enabled = true;
+            ButtonCancel.Enabled = true;
+
+            RefreshForm_Presets();
         }
 
         private void ComboBoxVoice_SelectedIndexChanged(object sender, EventArgs e)
@@ -1453,62 +1960,34 @@ namespace ATISPlugin
 
         private string WindOutput(string wind, double rwyHeading)
         {
-            if (string.IsNullOrWhiteSpace(wind))
-            {
-                return string.Empty;
-            }
+            var baseWind = Wind.StripComponents(wind);
 
-            if (wind == "CALM") return "CALM";
+            if (string.IsNullOrWhiteSpace(baseWind)) return string.Empty;
 
-            if (wind == "VRB") return "VARIABLE";
+            if (baseWind == "CALM") return "CALM";
 
-            var split = wind.Split('/');
+            if (baseWind.StartsWith("VRB")) return "VARIABLE";
 
-            if (split.Length != 2) return string.Empty;
+            var parsed = Wind.Parse(baseWind);
 
-            var windDirection = split.First();
+            if (parsed == null) return string.Empty;
 
-            var windSpeed = split.Last();
+            if (parsed.MaxSpeed == 0) return "CALM";
 
-            var gust = windSpeed.Split('-');
+            // Worst case across any direction range, at gust strength.
+            var components = parsed.Worst(rwyHeading);
 
-            if (gust.Length == 2)
-            {
-                windSpeed = gust.Last();
-            }
+            var crosswind = Math.Round(Math.Abs(components.Crosswind));
 
-            var windSpeedOK = double.TryParse(windSpeed, out double wSpeed);
+            var tailwind = Math.Round(components.Tailwind);
 
-            if (!windSpeedOK) return string.Empty;
+            var headwind = Math.Round(components.Headwind);
 
-            var windDirectionOk = double.TryParse(windDirection, out double wDirection);
+            var along = tailwind > 0 ? $"{tailwind:F0}kt Tailwind" : headwind > 0 ? $"{headwind:F0}kt Headwind" : string.Empty;
 
-            if (!windDirectionOk) return string.Empty;
+            var across = crosswind > 0 ? $"{crosswind:F0}kt {(components.Crosswind > 0 ? "Right" : "Left")} Crosswind" : string.Empty;
 
-            if (double.Parse(windSpeed) == 0.0) return "CALM";
-
-            double radians = Conversions.DegreesToRadians(wDirection);
-            double num1 = Conversions.DegreesToRadians(rwyHeading) - radians;
-            double num3 = Math.Round(wSpeed * Math.Sin(num1));
-            double num4 = Math.Round(wSpeed * Math.Cos(num1));
-            string str1 = Math.Abs(num3).ToString("F0");
-            string str2 = Math.Abs(num4).ToString("F0");
-
-            if (num3 < 0.0)
-                str1 += "kt Right Crosswind"; // Right
-            else if (num3 > 0.0)
-                str1 += "kt Left Crosswind"; // Left
-
-            if (num4 < 0.0)
-                str2 += "kt Tailwind";
-            else if (num4 > 0.0)
-                str2 += "kt Headwind";
-
-            if (str1 == "0") return str2;
-
-            if (str2 == "0") return str1;
-
-            return $"{str2}, {str1}";
+            return string.Join(", ", new[] { along, across }.Where(x => !string.IsNullOrEmpty(x)));
         }
 
         private void CalculateWind()
@@ -1517,7 +1996,7 @@ namespace ATISPlugin
 
             var atisWind = Control.Lines.FirstOrDefault(x => x.Name.Contains("WIND"));
 
-            var wind = saveWind.Key != null ? saveWind.Value : atisWind.Value;
+            var wind = saveWind.Key != null ? saveWind.Value : atisWind?.Value;
 
             if (wind == null) return;
 
@@ -1537,6 +2016,75 @@ namespace ATISPlugin
             var windComponents = WindOutput(wind, runwayHeading.Value);
 
             LabelWindComponents.Text = windComponents;
+        }
+
+        private const int CrosswindThreshold = 10;
+        private bool UpdatingWindComponents { get; set; }
+
+        // Appends the worst case crosswind (when above the threshold) and tailwind (when SFC COND isn't empty
+        // or DRY) for the runways named in the RWY field to the WIND field.
+        private void UpdateWindComponents()
+        {
+            if (UpdatingWindComponents || Control.IsZulu) return;
+
+            var windLine = Control.Lines.FirstOrDefault(x => x.METARField == METARField.Wind);
+            var runwayLine = Control.Lines.FirstOrDefault(x => x.Name == "RWY");
+            var surfaceLine = Control.Lines.FirstOrDefault(x => x.Name == SurfaceCondition.Field);
+
+            var windBox = windLine == null ? null : GetTextBox(windLine.Number);
+            var runwayBox = runwayLine == null ? null : GetTextBox(runwayLine.Number);
+            var surfaceBox = surfaceLine == null ? null : GetTextBox(surfaceLine.Number);
+
+            if (windBox == null || runwayBox == null) return;
+
+            var baseWind = Wind.StripComponents(windBox.Text);
+
+            var parsed = Wind.Parse(baseWind);
+
+            var output = baseWind;
+
+            if (parsed != null)
+            {
+                // Parallel runways (34L and 34R) share a direction, so only one entry per runway number.
+                var directions = Wind.RunwaysIn(runwayBox.Text).GroupBy(Wind.Direction).ToList();
+
+                var wet = surfaceBox != null && SurfaceCondition.Rank(surfaceBox.Text) > 0;
+
+                var crosswinds = new List<string>();
+                var tailwinds = new List<string>();
+
+                foreach (var direction in directions)
+                {
+                    var heading = GetRunwayHeading(direction.First()) ?? int.Parse(direction.Key) * 10;
+
+                    var components = parsed.Worst(heading);
+
+                    var crosswind = Math.Round(Math.Abs(components.Crosswind));
+                    var tailwind = Math.Round(components.Tailwind);
+
+                    // Only name the runway when there's more than one direction in use.
+                    var runway = directions.Count > 1 ? $" RWY {direction.Key}" : string.Empty;
+
+                    if (crosswind > CrosswindThreshold) crosswinds.Add($", MX XW {crosswind:F0}KTS{runway}");
+
+                    if (wet && tailwind > 0) tailwinds.Add($", MX TW {tailwind:F0}KTS{runway}");
+                }
+
+                output += string.Concat(crosswinds) + string.Concat(tailwinds);
+            }
+
+            if (windBox.Text == output) return;
+
+            // Keep the caret where it was while the controller is typing in the WIND field.
+            var selectionStart = windBox.SelectionStart;
+
+            UpdatingWindComponents = true;
+
+            windBox.Text = output;
+
+            windBox.SelectionStart = Math.Min(selectionStart, baseWind.Length);
+
+            UpdatingWindComponents = false;
         }
 
         private double? GetRunwayHeading(string runwayName)

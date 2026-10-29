@@ -29,6 +29,9 @@ namespace ATISPlugin
 
                 if (item == "AUTO") continue;
 
+                // Some METARs repeat the station, which would otherwise match as weather.
+                if (item == ICAO) continue;
+
                 if (item == "CAVOK") 
                 {
                     Weather = "CAVOK";
