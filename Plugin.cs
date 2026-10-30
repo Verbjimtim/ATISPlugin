@@ -26,14 +26,14 @@ namespace ATISPlugin
         public static string DisplayName => "ATIS Editor";
 
         private static readonly string RepositoryUrl = "https://raw.githubusercontent.com/badvectors/ATISPlugin/master";
-        private static readonly string PresetsUrl = $"{RepositoryUrl}/Presets.json";
-        private static readonly string OFCWUrl = $"{RepositoryUrl}/OFCW.json";
 
         // Config files live in the profile's Plugins\Configs folder. The repository copies are only a fallback
         // for profiles that don't have them yet.
         private const string ZuluFile = "Zulu.json";
         private const string CodesFile = "Codes.json";
         private const string PresetsFile = "ATISPresets.xml";
+        private const string PresetOptionsFile = "Presets.json";
+        private const string OFCWFile = "OFCW.json";
 
         private static readonly HttpClient Client = new HttpClient();
 
@@ -111,7 +111,7 @@ namespace ATISPlugin
         public Plugin()
         {
             // Stay inactive on profiles without an ATIS.xml in their dataset.
-            if (!File.Exists(Path.Combine(DatasetPath, "ATIS.xml"))) return;
+            if (DatasetPath == null || !File.Exists(Path.Combine(DatasetPath, "ATIS.xml"))) return;
 
             vatsys.ATIS.Disable();
 
@@ -289,7 +289,7 @@ namespace ATISPlugin
         {
             try
             {
-                var response = await Client.GetStringAsync(PresetsUrl);
+                var response = await GetConfigFile(PresetOptionsFile);
 
                 var presetOptions = JsonConvert.DeserializeObject<PresetOption[]>(response);
 
@@ -327,7 +327,7 @@ namespace ATISPlugin
         {
             try
             {
-                var response = await Client.GetStringAsync(OFCWUrl);
+                var response = await GetConfigFile(OFCWFile);
 
                 var ofcwInfo = JsonConvert.DeserializeObject<OFCWInfo[]>(response);
 
