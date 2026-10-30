@@ -3,14 +3,14 @@ using System.Text.RegularExpressions;
 
 namespace ATISPlugin
 {
-    // Runway changes in the OPR INFO field, written "FM TIME hhmm, EXP RWY ...".
+    // Runway changes in the OPR INFO field, written "FM TIME hhmm, EXP RWY ..." or "FROM TIME hhmm, EXPECT RWY ...".
     public static class RunwayChange
     {
         public const string Field = "OPR INFO";
 
-        private static readonly Regex TimeRegex = new Regex("\\bFM TIME (\\d{2})(\\d{2})\\b");
+        private static readonly Regex TimeRegex = new Regex("\\b(?:FM|FROM) TIME (\\d{2})(\\d{2})\\b");
 
-        // The first FM time in the text that has been reached, as hhmm, or null when there's none.
+        // The first FM (or FROM) time in the text that has been reached, as hhmm, or null when there's none.
         // A time is taken as the nearest one to now, so 0005 is 15 minutes away at 2350, and 2355 has passed at 0010.
         public static string Reached(string text, DateTime utcNow)
         {
