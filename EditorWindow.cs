@@ -105,14 +105,23 @@ namespace ATISPlugin
 
         private void OnRefreshEvent(object sender, RefreshEventArgs e)
         {
+            // Refreshes can come from network and audio events on other threads; the window belongs to the GUI thread.
+            if (IsHandleCreated && InvokeRequired)
+            {
+                BeginInvoke(new Action(() => OnRefreshEvent(sender, e)));
+
+                return;
+            }
+
             if (!IsHandleCreated)
             {
                 CreateHandle();
             }
 
+            // Switch to the ATIS the refresh is for.
             if (e != null && e.Number != Number)
             {
-                Change(Number);
+                Change(e.Number);
 
                 return;
             }
@@ -1695,7 +1704,7 @@ namespace ATISPlugin
 
             Saves.Clear();
 
-            Control.SuggestedLines.Clear();
+            Control.SuggestionsCancel();
 
             RefreshForm_ResetColours();
 
@@ -2255,15 +2264,14 @@ namespace ATISPlugin
 
             if (oppositeRunway == null) return null;
 
-            var position = LogicalPositions.Positions.FirstOrDefault(x => x.Name == Control.ICAO);
+            var variation = Magnetic.Variation(Control.ICAO);
 
-            if (position == null) return null;
+            if (variation == null) return null;
 
-            var heading = Conversions.CalculateTrack(runway.LatLong, oppositeRunway.LatLong);
+            // Magnetic, to match the ATIS wind.
+            var heading = Conversions.CalculateTrack(runway.LatLong, oppositeRunway.LatLong) + variation.Value;
 
-            heading = heading + position.MagneticVariation;
-
-            return Math.Round(heading, 0);
+            return Math.Round(((heading % 360) + 360) % 360, 0);
         }
 
         public static Airspace2.Airport.Runway OppositeRunway(Airspace2.Airport airport, string runway)

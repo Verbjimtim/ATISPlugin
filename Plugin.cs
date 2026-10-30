@@ -155,23 +155,43 @@ namespace ATISPlugin
             MET.Instance.ProductsChanged += METARChanged;
         }
 
+        // Handled on the GUI thread, like the timed updates, as it changes the suggestions and can open the editor.
         private void METARChanged(object sender, MET.ProductsChangedEventArgs e)
         {
-            var products = MET.Instance.GetProducts(e.ProductRequest);
-            
-            if (products == null || products.Count == 0) return;
-            
-            var metar = products[0];
+            try
+            {
+                MMI.InvokeOnGUI(delegate () { UpdateMetar(e); });
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not update ATIS from METAR: {ex.Message}"), DisplayName);
+            }
+        }
 
-            if (metar.Type != MET.ProductType.VATSIM_METAR || metar.Text == "No product available.") return;
+        private void UpdateMetar(MET.ProductsChangedEventArgs e)
+        {
+            try
+            {
+                var products = MET.Instance.GetProducts(e.ProductRequest);
 
-            var atis = GetATIS(metar.Icao);
+                if (products == null || products.Count == 0) return;
 
-            if (atis == null) return;
+                var metar = products[0];
 
-            var updated = atis.UpdateMetar(metar.Text);
+                if (metar.Type != MET.ProductType.VATSIM_METAR || metar.Text == "No product available.") return;
 
-            OnMETARUpdate(atis.Number, updated);
+                var atis = GetATIS(metar.Icao);
+
+                if (atis == null) return;
+
+                var updated = atis.UpdateMetar(metar.Text);
+
+                OnMETARUpdate(atis.Number, updated);
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not update ATIS from METAR: {ex.Message}"), DisplayName);
+            }
         }
 
         private ATISControl GetATIS(string icao)
@@ -310,8 +330,21 @@ namespace ATISPlugin
             BroadcastTimer.Start();
         }
 
-        // SFC COND clearing and windshear expiry are time based, so check them every minute.
+        // SFC COND clearing and windshear expiry are time based, so check them every minute. The timer runs on a
+        // background thread, so the check is done on the GUI thread, which owns the editor and the suggestions.
         private void TimedUpdatesTimer_Elapsed(object sender, ElapsedEventArgs e)
+        {
+            try
+            {
+                MMI.InvokeOnGUI(delegate () { CheckTimedUpdates(); });
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not check ATIS timed updates: {ex.Message}"), DisplayName);
+            }
+        }
+
+        private void CheckTimedUpdates()
         {
             try
             {

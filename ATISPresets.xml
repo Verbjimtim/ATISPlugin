@@ -355,7 +355,7 @@
     </Mode>
     <Mode Name="22 PROPS" Priority="2">
       <Field Name="APCH" />
-      <Field Name="RWY">22. EASTERN DEPS NAVBL. RWY 22R FOR ARRS AND DEPS NORTH AND WEST. RWY 22L FOR ARRS SOUTH AND EAST AND DEPS SOUTH</Field>
+      <Field Name="RWY">EASTERN DEPS NAVBL. RWY 22R FOR ARRS AND DEPS NORTH AND WEST. RWY 22L FOR ARRS SOUTH AND EAST AND DEPS SOUTH</Field>
     </Mode>
     <Mode Name="22 PROPS (DUAL ADC)" Priority="2">
       <Field Name="APCH" />

@@ -422,7 +422,9 @@ namespace ATISPlugin
 
         public void SuggestionsCancel()
         {
-            METARRaw = METARLastRaw;
+            // Forget the METAR whose suggestions are being dropped, so they're suggested again the next time it arrives.
+            if (SuggestedLines.Any(x => x.METARField != METARField.None)) METARRaw = METARLastRaw;
+
             SuggestedLines.Clear();
         }
 

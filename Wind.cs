@@ -38,6 +38,24 @@ namespace ATISPlugin
             return new Wind { From = from, To = to, Speed = speed, MaxSpeed = Math.Max(speed, maxSpeed) };
         }
 
+        // A METAR wind (true) as an ATIS wind (magnetic). CALM, VRB and anything else without a direction are unchanged.
+        public static string ToMagnetic(string wind, double? variation)
+        {
+            if (variation == null) return wind;
+
+            var match = WindRegex.Match(wind ?? string.Empty);
+
+            if (!match.Success) return wind;
+
+            var direction = match.Groups[2].Success ? match.Groups[2] : match.Groups[1];
+
+            var output = Magnetic.ToMagnetic(int.Parse(match.Groups[1].Value), variation.Value).ToString("D3");
+
+            if (match.Groups[2].Success) output += "-" + Magnetic.ToMagnetic(int.Parse(match.Groups[2].Value), variation.Value).ToString("D3");
+
+            return output + wind.Substring(direction.Index + direction.Length);
+        }
+
         // A runway designator only where RWY wording puts one: at the start of the field or after "RWY"/"RWYS".
         // Never next to a digit or a decimal point, so other numbers in the field (frequencies such as
         // "FREQ 120.15", distances, times) aren't read as runways.

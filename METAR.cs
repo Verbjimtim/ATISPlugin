@@ -172,9 +172,11 @@ namespace ATISPlugin
                 // TEMP/ DEP
                 if (Regex.IsMatch(item, "^M{0,1}\\d{2}\\/M{0,1}\\d{2}$"))
                 {
-                    Temperature = item[0] != '0' ? item.Substring(0, 2) : item.Substring(1, 1);
+                    var temperatures = item.Split('/');
 
-                    DewPoint = item[3] != '0' ? item.Substring(3) : item.Substring(4);
+                    Temperature = FormatTemperature(temperatures[0]);
+
+                    DewPoint = FormatTemperature(temperatures[1]);
 
                     continue;
                 }
@@ -194,7 +196,18 @@ namespace ATISPlugin
                 Weather = "CAVOK";
             }
 
+            // The ATIS gives the wind magnetic.
+            Wind = ATISPlugin.Wind.ToMagnetic(Wind, Magnetic.Variation(ICAO));
+
             return this;
+        }
+
+        // "05" as 5 and "M05" (below zero) as MINUS 5. M00 is just 0.
+        private static string FormatTemperature(string value)
+        {
+            var degrees = int.Parse(value.TrimStart('M'));
+
+            return value.StartsWith("M") && degrees != 0 ? $"MINUS {degrees}" : degrees.ToString();
         }
 
         public string GetField(METARField field)
