@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Speech.Synthesis;
@@ -26,7 +26,8 @@ namespace ATISPlugin
         private string ICAO { get; set; }
         private char ID { get; set; }
         private string DisplayName => Airport == null ? ICAO : $"{ICAO} - {Airport.FullName}";
-        private Airspace2.Airport Airport => Airspace2.GetAirport(ICAO);
+        // vatSys looks airports up in a dictionary, which throws for a null key.
+        private Airspace2.Airport Airport => ICAO == null ? null : Airspace2.GetAirport(ICAO);
         public int Number { get; private set; } = 1;
         private Dictionary<string, string> Saves { get; set; } = new Dictionary<string, string>();
         private string Mode { get; set; }
@@ -101,7 +102,10 @@ namespace ATISPlugin
 
                 RefreshForm();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not load ATIS {number}: {ex.Message}"), Plugin.DisplayName);
+            }
         }
 
         private void OnRefreshEvent(object sender, RefreshEventArgs e)
@@ -114,20 +118,28 @@ namespace ATISPlugin
                 return;
             }
 
-            if (!IsHandleCreated)
+            // This runs from BeginInvoke, where an exception would take vatSys down, so it's reported instead.
+            try
             {
-                CreateHandle();
-            }
+                if (!IsHandleCreated)
+                {
+                    CreateHandle();
+                }
 
-            // Switch to the ATIS the refresh is for.
-            if (e != null && e.Number != Number)
+                // Switch to the ATIS the refresh is for.
+                if (e != null && e.Number != Number)
+                {
+                    Change(e.Number);
+
+                    return;
+                }
+
+                RefreshForm();
+            }
+            catch (Exception ex)
             {
-                Change(e.Number);
-
-                return;
+                Errors.Add(new Exception($"Could not refresh the ATIS editor: {ex.Message}"), Plugin.DisplayName);
             }
-
-            RefreshForm();
         }
 
         private void EditorWindow_Load(object sender, EventArgs e)
@@ -253,9 +265,15 @@ namespace ATISPlugin
                 options.AddRange(PresetAirport.GetPresets(line.Name, Modes, Mode).Where(x => !options.Contains(x)));
             }
 
-            if (line.Name == PresetAirport.ApproachField && !(PresetAirport?.DefinesField(PresetAirport.ApproachField) ?? false))
+            if (line.Name == PresetAirport.ApproachField)
             {
-                options.AddRange(PresetAirport.DefaultApproaches.Where(x => !options.Contains(x)));
+                if (!(PresetAirport?.DefinesField(PresetAirport.ApproachField) ?? false))
+                {
+                    options.AddRange(PresetAirport.DefaultApproaches.Where(x => !options.Contains(x)));
+                }
+
+                // A blank APCH (visual approaches) is always available.
+                if (!options.Contains(string.Empty)) options.Add(string.Empty);
             }
 
             // Without a runway mode, any single runway can be nominated. Airports with SingleRunwayFormat
