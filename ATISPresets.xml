@@ -37,8 +37,9 @@
   <AutoAdd Field="SIGWX" Runways="34R" Modes="A,B" Wind="020-070" AboveSpeed="14">TEXT</AutoAdd> on <Airport>
              adds TEXT to the field while every given condition is met, and removes it once one isn't:
              Runways all in RWY, one of Modes selected, any of the WIND direction range within Wind (magnetic,
-             clockwise, inclusive), the mean speed above AboveSpeed, and the worst case crosswind on a runway in
-             RWY above AboveCrosswind. Checked when WIND, RWY or MODE changes.
+             clockwise, inclusive), the mean speed above AboveSpeed, and the worst case crosswind above
+             AboveCrosswind (on the Runways given, otherwise on any runway in RWY). Checked when WIND, RWY or
+             MODE changes.
 
   APCH options EXP INST APCH, EXP ILS APCH, EXP GLS APCH and EXP RNP APCH are built in for airports that don't
   list any APCH values (as presets or in a mode). With no runway mode selected, RWY also offers each runway.
@@ -249,7 +250,42 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YPAD">
+  <Airport ICAO="YPAD" TimeZone="Cen. Australia Standard Time">
+    <!-- The SOP gives no RWY wording for these modes; it follows the YPPH crossing runway format.
+         OPR INFO is cleared, so curfew wording doesn't carry over from RRO. -->
+    <Mode Name="2312A23D" Priority="1">
+      <Field Name="RWY">23 AND RWY 12 FOR ARR. RWY 23 FOR DEP</Field>
+      <Field Name="OPR INFO" />
+    </Mode>
+    <Mode Name="0512A05D" Priority="2">
+      <Field Name="RWY">05 AND RWY 12 FOR ARR. RWY 05 FOR DEP</Field>
+      <Field Name="OPR INFO" />
+    </Mode>
+    <Mode Name="RWY 23" Priority="3">
+      <Field Name="RWY">23</Field>
+      <Field Name="OPR INFO" />
+    </Mode>
+    <Mode Name="RWY 05" Priority="4">
+      <Field Name="RWY">05</Field>
+      <Field Name="OPR INFO" />
+    </Mode>
+    <Mode Name="RWY 12" Priority="5">
+      <Field Name="RWY">12</Field>
+      <Field Name="OPR INFO" />
+    </Mode>
+    <Mode Name="RWY 30" Priority="6">
+      <Field Name="RWY">30</Field>
+      <Field Name="OPR INFO" />
+    </Mode>
+    <!-- Curfew (RRO) is permitted between 2300 and 0600 local. -->
+    <Mode Name="CURFEW RRO (ACST)" Hours="2300-0600" DaylightSaving="false">
+      <Field Name="RWY">05 FOR ARR. RWY 23 FOR DEP</Field>
+      <Field Name="OPR INFO">CURFEW IN OPERATION UNTIL TIME 2030</Field>
+    </Mode>
+    <Mode Name="CURFEW RRO (ACDT)" Hours="2300-0600" DaylightSaving="true">
+      <Field Name="RWY">05 FOR ARR. RWY 23 FOR DEP</Field>
+      <Field Name="OPR INFO">CURFEW IN OPERATION UNTIL TIME 1930</Field>
+    </Mode>
     <Presets Field="APCH">
       <Preset>ACFT FM THE EAST AND JET ACFT FM THE WEST EXP INST APCH</Preset>
       <Preset>EXP INST APCH</Preset>
@@ -276,6 +312,31 @@
   </Airport>
 
   <Airport ICAO="YSCB">
+    <!-- The SOP gives no RWY wording for these modes; it follows the YPPH crossing runway format. -->
+    <Mode Name="3530A35D" Priority="1">
+      <Field Name="RWY">35 AND RWY 30 FOR ARR. RWY 35 FOR DEP</Field>
+    </Mode>
+    <Mode Name="1712A17D" Priority="2">
+      <Field Name="RWY">17 AND RWY 12 FOR ARR. RWY 17 FOR DEP</Field>
+    </Mode>
+    <Mode Name="17A35D (RRO)" Priority="3">
+      <Field Name="RWY">17 FOR ARR. RWY 35 FOR DEP</Field>
+    </Mode>
+    <Mode Name="RWY 35" Priority="4">
+      <Field Name="RWY">35</Field>
+    </Mode>
+    <Mode Name="RWY 17" Priority="4">
+      <Field Name="RWY">17</Field>
+    </Mode>
+    <Mode Name="RWY 30" Priority="5">
+      <Field Name="RWY">30</Field>
+    </Mode>
+    <Mode Name="RWY 12" Priority="6">
+      <Field Name="RWY">12</Field>
+    </Mode>
+    <!-- Crosswind above 11KT from the west on runway 17/35. -->
+    <AutoAdd Field="SIGWX" Runways="35" Wind="180-360" AboveCrosswind="11">EXP TURB OVER RWY 35, S OF RWY INT</AutoAdd>
+    <AutoAdd Field="SIGWX" Runways="17" Wind="180-360" AboveCrosswind="11">EXP TURB OVER RWY 17, S OF RWY INT</AutoAdd>
     <Presets Field="SIGWX" Multiple="true">
       <Preset>EXP TURB OVER RWY 17, S OF RWY INT</Preset>
       <Preset>EXP TURB OVER RWY 35, S OF RWY INT</Preset>

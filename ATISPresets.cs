@@ -252,7 +252,8 @@ namespace ATISPlugin
         [XmlAttribute]
         public int AboveSpeed { get; set; }
 
-        // Crosswind (kt) to be exceeded on a runway in RWY: the worst case, as reported in WIND as MX XW.
+        // Crosswind (kt) to be exceeded: the worst case, as reported in WIND as MX XW, on the rule's Runways when
+        // given, otherwise on any runway in RWY.
         [XmlAttribute]
         public int AboveCrosswind { get; set; }
 
@@ -283,9 +284,12 @@ namespace ATISPlugin
 
             if (AboveCrosswind > 0)
             {
-                if (wind == null || !runwaysInUse.Any()) return false;
+                // On the rule's own runways when it lists them (e.g. 35 but not a crossing 30), otherwise any in RWY.
+                var runways = List(Runways).Any() ? List(Runways) : runwaysInUse.ToList();
 
-                var crosswind = runwaysInUse.Max(x => Math.Round(Math.Abs(wind.Worst(heading(x)).Crosswind)));
+                if (wind == null || !runways.Any()) return false;
+
+                var crosswind = runways.Max(x => Math.Round(Math.Abs(wind.Worst(heading(x)).Crosswind)));
 
                 if (crosswind <= AboveCrosswind) return false;
             }
