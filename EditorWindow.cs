@@ -67,10 +67,6 @@ namespace ATISPlugin
             ComboBoxLetter.FocusColor = Colours.GetColour(Colours.Identities.HighlightedText);
             ComboBoxLetter.Font = MMI.eurofont_winsml;
 
-            // Read only, so set the colours explicitly to match the editable fields.
-            TextBoxMode.BackColor = TextBox1.BackColor;
-            TextBoxMode.ForeColor = TextBox1.ForeColor;
-
             CreatePresetButtons();
 
             Initialized = true;
@@ -296,7 +292,8 @@ namespace ATISPlugin
         }
 
         private const int TextBoxWidth = 492;
-        private const int PresetButtonWidth = 26;
+        // Arrow buttons are square, as tall as the text boxes (which size themselves to the font).
+        private int PresetButtonWidth => TextBox1.Height;
         private ContextMenuStrip FieldMenu;
         private PresetButton ButtonMode;
 
@@ -310,7 +307,7 @@ namespace ATISPlugin
             {
                 Name = "ButtonMode",
                 Location = new System.Drawing.Point(TextBoxMode.Left + TextBoxWidth - PresetButtonWidth, TextBoxMode.Top),
-                Size = new System.Drawing.Size(PresetButtonWidth, TextBoxMode.Height)
+                Size = new System.Drawing.Size(PresetButtonWidth, PresetButtonWidth)
             };
 
             ButtonMode.Click += (s, e) => ShowModeMenu();
@@ -325,7 +322,7 @@ namespace ATISPlugin
                 {
                     Name = $"ButtonPreset{number}",
                     Location = new System.Drawing.Point(textBox.Left + TextBoxWidth - PresetButtonWidth, textBox.Top),
-                    Size = new System.Drawing.Size(PresetButtonWidth, textBox.Height),
+                    Size = new System.Drawing.Size(PresetButtonWidth, PresetButtonWidth),
                     Visible = false
                 };
 
@@ -645,6 +642,108 @@ namespace ATISPlugin
             return RunwaySelection.FromMetar(Control.METARRaw, wet);
         }
 
+        // The profile's GroundUnknown colour (orange), as the window colours have no orange.
+        private static System.Drawing.Color OutsideLimitsColour => Colours.GetColour(Colours.Identities.GroundUnknown);
+
+        // vatSys text fields draw their own background and ignore BackColor, so the highlight is a frame drawn
+        // behind the field, just larger than it.
+        private const int HighlightWidth = 2;
+        private readonly Dictionary<TextBox, Panel> FieldHighlights = new Dictionary<TextBox, Panel>();
+
+        // Highlights the RWY field when its runways are outside the SOP wind limits (or a dry only mode on a wet runway),
+        // and the APCH field when the weather is below that approach's minima. Only a warning: the ATIS can still be saved.
+        private void RefreshForm_Limits()
+        {
+            var runwayLine = Control.Lines.FirstOrDefault(x => x.Name == "RWY");
+            var approachLine = Control.Lines.FirstOrDefault(x => x.Name == "APCH");
+            var windLine = Control.Lines.FirstOrDefault(x => x.METARField == METARField.Wind);
+
+            var runwayBox = runwayLine == null ? null : GetTextBox(runwayLine.Number);
+            var approachBox = approachLine == null ? null : GetTextBox(approachLine.Number);
+            var windBox = windLine == null ? null : GetTextBox(windLine.Number);
+
+            var active = Control.ICAO != null && !Control.IsZulu && Network.IsConnected;
+
+            var conditions = GetRunwayConditions();
+
+            // What's being published, rather than the METAR, for the wind.
+            if (windBox != null) conditions.Wind = Wind.Parse(windBox.Text);
+
+            var runwayOutside = false;
+
+            if (active && runwayBox != null && !string.IsNullOrWhiteSpace(runwayBox.Text))
+            {
+                // The selected mode's runway list and dry only rule apply while RWY still matches it.
+                var mode = Modes.FirstOrDefault(x => x.Name == Mode);
+                var modeRunway = mode?.Fields.FirstOrDefault(x => x.Name == "RWY");
+                var matchesMode = modeRunway != null && PresetAirport.Clean(modeRunway.Value) == PresetAirport.Clean(runwayBox.Text);
+
+                var runwayCheck = new PresetMode
+                {
+                    Runways = matchesMode ? mode.Runways : null,
+                    DryOnly = matchesMode && mode.DryOnly
+                };
+
+                runwayCheck.Fields.Add(new PresetModeField { Name = "RWY", Value = runwayBox.Text });
+
+                // Without a runway number in RWY there's nothing to check.
+                if (!string.IsNullOrWhiteSpace(runwayCheck.Runways) || Wind.RunwaysInUse(runwayBox.Text).Any())
+                {
+                    runwayOutside = !RunwaySelection.Assess(runwayCheck, conditions, RunwayHeading).Usable;
+                }
+            }
+
+            var approachOutside = false;
+
+            if (active && approachBox != null && !string.IsNullOrWhiteSpace(approachBox.Text))
+            {
+                // Approach minima come from the modes that use this approach wording.
+                var approach = PresetAirport.Clean(approachBox.Text);
+
+                var minima = Modes.FirstOrDefault(x => (x.MinCeiling > 0 || x.MinVisibility > 0)
+                    && x.Fields.Any(f => f.Name == "APCH" && PresetAirport.Clean(f.Value) == approach));
+
+                if (minima != null)
+                {
+                    approachOutside = conditions.Ceiling < minima.MinCeiling || conditions.Visibility < minima.MinVisibility;
+                }
+            }
+
+            SetOutsideLimits(runwayLine, runwayOutside);
+            SetOutsideLimits(approachLine, approachOutside);
+        }
+
+        private void SetOutsideLimits(ATISLine line, bool outside)
+        {
+            var textBox = line == null ? null : GetTextBox(line.Number);
+
+            if (textBox == null) return;
+
+            if (!FieldHighlights.TryGetValue(textBox, out var highlight))
+            {
+                highlight = new Panel { Visible = false };
+
+                Controls.Add(highlight);
+
+                FieldHighlights.Add(textBox, highlight);
+            }
+
+            highlight.Visible = outside && textBox.Visible;
+
+            if (!highlight.Visible) return;
+
+            highlight.BackColor = OutsideLimitsColour;
+
+            // Follows the field, which moves with the layout.
+            var bounds = textBox.Bounds;
+
+            bounds.Inflate(HighlightWidth, HighlightWidth);
+
+            if (highlight.Bounds != bounds) highlight.Bounds = bounds;
+
+            highlight.SendToBack();
+        }
+
         private double RunwayHeading(string runway) => GetRunwayHeading(runway) ?? int.Parse(runway.Substring(0, 2)) * 10;
 
         // Picks the best runway mode the first time the ATIS has a METAR, once only per ATIS.
@@ -685,6 +784,8 @@ namespace ATISPlugin
 
             RefreshForm_PresetButtons(enabled);
 
+            RefreshForm_Limits();
+
             RefreshForm_Layout();
         }
 
@@ -711,6 +812,7 @@ namespace ATISPlugin
                 LabelMode.Location = new System.Drawing.Point(8, y + 3);
                 TextBoxMode.Location = new System.Drawing.Point(172, y);
                 ButtonMode.Location = new System.Drawing.Point(172 + TextBoxWidth - PresetButtonWidth, y);
+                ButtonMode.Size = new System.Drawing.Size(PresetButtonWidth, PresetButtonWidth);
                 y += RowHeight;
             }
 
@@ -733,7 +835,7 @@ namespace ATISPlugin
                 label.Location = new System.Drawing.Point(8, y + 3);
                 textBox.Location = new System.Drawing.Point(172, y);
                 button.Location = new System.Drawing.Point(172 + TextBoxWidth - PresetButtonWidth, y);
-                button.Height = textBox.Height;
+                button.Size = new System.Drawing.Size(PresetButtonWidth, PresetButtonWidth);
 
                 y += RowHeight;
             }
@@ -1105,6 +1207,9 @@ namespace ATISPlugin
             TextBoxZulu.TextChanged -= TextBox_TextChanged;
         }
 
+        private int AppliedSuggestionsVersion { get; set; } = -1;
+        private string AppliedMetar { get; set; }
+
         private void RefreshForm_WithATIS()
         {
             if (Control.IsZulu)
@@ -1126,6 +1231,27 @@ namespace ATISPlugin
             ComboBoxTimeCheck.Enabled = true;
 
             RefreshForm_UnhookTextBoxes();
+
+            // A newer METAR replaces pending values in the METAR fields (including ones from an earlier METAR that
+            // wasn't saved), and new suggestions replace pending values in the fields they cover. Edits made after
+            // that stay until the next METAR or suggestion.
+            var newMetar = Control.METARRaw != AppliedMetar;
+
+            if (newMetar || Control.SuggestionsVersion != AppliedSuggestionsVersion)
+            {
+                var suggested = Control.SuggestedLines.ToList();
+
+                foreach (var line in Control.Lines)
+                {
+                    if ((newMetar && line.METARField != METARField.None) || suggested.Any(x => x.Name == line.Name))
+                    {
+                        Saves.Remove(line.Name);
+                    }
+                }
+
+                AppliedMetar = Control.METARRaw;
+                AppliedSuggestionsVersion = Control.SuggestionsVersion;
+            }
 
             foreach (var line in Control.Lines)
             {
@@ -1690,6 +1816,11 @@ namespace ATISPlugin
                 UpdateWindComponents();
             }
 
+            if (line.METARField == METARField.Wind || line.Name == "RWY" || line.Name == "APCH" || line.Name == SurfaceCondition.Field)
+            {
+                RefreshForm_Limits();
+            }
+
             var save = Saves.FirstOrDefault(x => x.Key == line.Name);
 
             if (save.Key != null)
@@ -2018,11 +2149,27 @@ namespace ATISPlugin
             LabelWindComponents.Text = windComponents;
         }
 
-        private const int CrosswindThreshold = 10;
         private bool UpdatingWindComponents { get; set; }
 
-        // Appends the worst case crosswind (when above the threshold) and tailwind (when SFC COND isn't empty
-        // or DRY) for the runways named in the RWY field to the WIND field.
+        // Runways in the RWY field, using the selected mode's runways when it lists them and RWY still matches it
+        // (e.g. "10L/28R ..." names both ends, but the 28 PROPS mode only uses 28L and 28R).
+        private List<string> GetRunwaysForWind(string runwayText)
+        {
+            var mode = Modes.FirstOrDefault(x => x.Name == Mode);
+
+            var modeRunway = mode?.Fields.FirstOrDefault(x => x.Name == "RWY");
+
+            if (mode != null && !string.IsNullOrWhiteSpace(mode.Runways) && modeRunway != null
+                && PresetAirport.Clean(modeRunway.Value) == PresetAirport.Clean(runwayText))
+            {
+                return mode.Runways.Split('|').First().Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+            }
+
+            return Wind.RunwaysInUse(runwayText);
+        }
+
+        // Appends the worst case crosswind (from the airport's reporting threshold) and tailwind (when SFC COND
+        // isn't empty or DRY) for the runways named in the RWY field to the WIND field.
         private void UpdateWindComponents()
         {
             if (UpdatingWindComponents || Control.IsZulu) return;
@@ -2046,7 +2193,9 @@ namespace ATISPlugin
             if (parsed != null)
             {
                 // Parallel runways (34L and 34R) share a direction, so only one entry per runway number.
-                var directions = Wind.RunwaysIn(runwayBox.Text).GroupBy(Wind.Direction).ToList();
+                var directions = GetRunwaysForWind(runwayBox.Text).GroupBy(Wind.Direction).ToList();
+
+                var reportCrosswindFrom = PresetAirport?.ReportCrosswindFrom ?? PresetAirport.DefaultReportCrosswindFrom;
 
                 var wet = surfaceBox != null && SurfaceCondition.Rank(surfaceBox.Text) > 0;
 
@@ -2062,10 +2211,13 @@ namespace ATISPlugin
                     var crosswind = Math.Round(Math.Abs(components.Crosswind));
                     var tailwind = Math.Round(components.Tailwind);
 
-                    // Only name the runway when there's more than one direction in use.
-                    var runway = directions.Count > 1 ? $" RWY {direction.Key}" : string.Empty;
+                    // Only name the runway when there's more than one direction in use: the runway itself
+                    // (e.g. 16L in SODPROPS), or just the number when parallels are used together.
+                    var name = direction.Count() == 1 ? direction.First() : direction.Key;
 
-                    if (crosswind > CrosswindThreshold) crosswinds.Add($", MX XW {crosswind:F0}KTS{runway}");
+                    var runway = directions.Count > 1 ? $" RWY {name}" : string.Empty;
+
+                    if (crosswind >= reportCrosswindFrom) crosswinds.Add($", MX XW {crosswind:F0}KTS{runway}");
 
                     if (wet && tailwind > 0) tailwinds.Add($", MX TW {tailwind:F0}KTS{runway}");
                 }

@@ -21,8 +21,6 @@ namespace ATISPlugin
 
         private static readonly Regex WindRegex = new Regex("^(\\d{3})(?:-(\\d{3}))?/(\\d{1,3})(?:-(\\d{1,3}))?$");
 
-        private static readonly Regex RunwayRegex = new Regex("\\b(0[1-9]|[12]\\d|3[0-6])[LRC]?\\b");
-
         public static string StripComponents(string wind) => SuffixRegex.Replace(wind ?? string.Empty, string.Empty).Trim();
 
         // Returns null for CALM, VRB or anything else that has no usable direction.
@@ -40,11 +38,11 @@ namespace ATISPlugin
             return new Wind { From = from, To = to, Speed = speed, MaxSpeed = Math.Max(speed, maxSpeed) };
         }
 
-        // Runway designators (e.g. 34L, 07) mentioned in the ATIS RWY field.
-        public static List<string> RunwaysIn(string text) =>
-            RunwayRegex.Matches(text ?? string.Empty).Cast<Match>().Select(x => x.Value).Distinct().ToList();
-
-        private static readonly Regex RunwayInUseRegex = new Regex("\\b(0[1-9]|[12]\\d|3[0-6])([LRC]?)((?:\\s+AND\\s+[LRC]\\b)*)");
+        // A runway designator only where RWY wording puts one: at the start of the field or after "RWY"/"RWYS".
+        // Never next to a digit or a decimal point, so other numbers in the field (frequencies such as
+        // "FREQ 120.15", distances, times) aren't read as runways.
+        private static readonly Regex RunwayInUseRegex = new Regex(
+            "(?<=^\\s*|\\bRWYS?\\s+)(0[1-9]|[12]\\d|3[0-6])([LRC]?)(?![\\dLRC]|\\.\\d)((?:\\s+AND\\s+[LRC]\\b)*)");
 
         // Every runway in the ATIS RWY field, expanding "34L AND R" to 34L and 34R.
         public static List<string> RunwaysInUse(string text)

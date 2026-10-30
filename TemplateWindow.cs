@@ -68,7 +68,6 @@ namespace ATISPlugin
     {
         private const int WindowWidth = 472;
         private const int RowHeight = 31;
-        private const int ButtonWidth = 26;
 
         private readonly string TemplateText;
         private readonly ToolStripRenderer MenuRenderer;
@@ -209,25 +208,25 @@ namespace ATISPlugin
         // A read only box with an arrow button, matching the editor's MODE row.
         private Func<string> AddChoice(int x, int y, int width, List<string> choices, string initial)
         {
-            var reference = new TextField();
-
             var field = new TextField
             {
                 ReadOnly = true,
                 Location = new Point(x, y),
-                Size = new Size(width - ButtonWidth - 4, 25),
                 Text = initial
             };
 
-            field.BackColor = reference.BackColor;
-            field.ForeColor = reference.ForeColor;
+            // Added first so the field takes the window's font, and with it its final height.
+            Controls.Add(field);
 
-            reference.Dispose();
+            var size = field.Height;
 
+            field.Width = width - size - 4;
+
+            // Square, as tall as the field.
             var button = new PresetButton
             {
-                Location = new Point(x + width - ButtonWidth, y),
-                Size = new Size(ButtonWidth, field.Height)
+                Location = new Point(x + width - size, y),
+                Size = new Size(size, size)
             };
 
             var menu = PresetMenu.Create(MenuRenderer);
@@ -251,7 +250,6 @@ namespace ATISPlugin
             button.Click += (s, e) => ShowMenu();
             field.MouseUp += (s, e) => ShowMenu();
 
-            Controls.Add(field);
             Controls.Add(button);
 
             return () => field.Text.Trim();

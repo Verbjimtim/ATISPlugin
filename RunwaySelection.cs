@@ -30,6 +30,9 @@ namespace ATISPlugin
         {
             public PresetMode Mode { get; set; }
             public bool Usable { get; set; }
+            public bool WeatherOk { get; set; }
+            // Knots over the crosswind and tailwind limits, combined.
+            public double Excess { get; set; }
             public double Tailwind { get; set; }
             public double Crosswind { get; set; }
             public double AverageCrosswind { get; set; }
@@ -98,7 +101,7 @@ namespace ATISPlugin
 
             foreach (var group in RunwayGroups(mode))
             {
-                var assessment = new Assessment { Mode = mode };
+                var assessment = new Assessment { Mode = mode, WeatherOk = weatherOk };
 
                 if (conditions.Wind != null)
                 {
@@ -109,13 +112,15 @@ namespace ATISPlugin
                     assessment.AverageCrosswind = Math.Round(components.Average(x => Math.Abs(x.Crosswind)));
                 }
 
+                assessment.Excess = Math.Max(0, assessment.Tailwind - maxTailwind) + Math.Max(0, assessment.Crosswind - MaxCrosswind);
+
                 assessment.Usable = weatherOk && assessment.Tailwind <= maxTailwind && assessment.Crosswind <= MaxCrosswind;
 
                 if (best == null || Compare(assessment, best) < 0) best = assessment;
             }
 
             // Without runways to check, the wind can't be judged, so it's never picked automatically.
-            return best ?? new Assessment { Mode = mode, Usable = false, Tailwind = Unlimited, Crosswind = Unlimited, AverageCrosswind = Unlimited };
+            return best ?? new Assessment { Mode = mode, Usable = false, WeatherOk = weatherOk, Excess = Unlimited, Tailwind = Unlimited, Crosswind = Unlimited, AverageCrosswind = Unlimited };
         }
 
         // Best first: automatic modes, usable, SOP priority, least tailwind, then least crosswind. Ties keep the
@@ -127,6 +132,9 @@ namespace ATISPlugin
             {
                 x => x.Mode.AutoSelect ? 0 : 1,
                 x => x.Usable ? 0 : 1,
+                // When nothing is within limits: weather minima met first, then the least over the wind limits.
+                x => x.Usable || x.WeatherOk ? 0 : 1,
+                x => x.Usable ? 0 : x.Excess,
                 x => x.Mode.Priority > 0 ? x.Mode.Priority : x.Mode.Generated ? Generated : Unranked,
                 x => x.Tailwind,
                 x => x.Crosswind,
@@ -151,8 +159,8 @@ namespace ATISPlugin
             return assessments.OrderBy(x => x, Comparer<Assessment>.Create(Compare)).ToList();
         }
 
-        // The best mode to start with, or null if none is suitable.
+        // The best mode to start with. When no mode is within the SOP limits (e.g. a storm), the least bad one.
         public static PresetMode Best(IEnumerable<PresetMode> modes, Conditions conditions, Func<string, double> heading) =>
-            Rank(modes, conditions, heading).FirstOrDefault(x => x.Mode.AutoSelect && x.Usable)?.Mode;
+            Rank(modes, conditions, heading).FirstOrDefault(x => x.Mode.AutoSelect)?.Mode;
     }
 }

@@ -45,6 +45,8 @@ namespace ATISPlugin
         private MemoryStream CompleteStream;
         public List<ATISLine> SuggestedLines { get; set; } = new List<ATISLine>();
         public bool HasUpdates => SuggestedLines.Any();
+        // Goes up each time new suggestions arrive (a METAR or a timed update), so the editor knows to apply them.
+        public int SuggestionsVersion { get; private set; }
         public SpeechSynthesizer SpeechSynth { get; set; }
         private PromptBuilder ATISSpoken { get; set; }
         private SpeechAudioFormatInfo SpeechFormat { get; set; }
@@ -507,6 +509,8 @@ namespace ATISPlugin
 
             if (!suggestedLines.Any()) return false;
 
+            SuggestionsVersion++;
+
             return true;
         }
 
@@ -579,6 +583,8 @@ namespace ATISPlugin
             SuggestedLines.RemoveAll(x => x.Name == line.Name);
 
             SuggestedLines.Add(new ATISLine(line.Name, 0, line.Type, line.NameSpoken, line.NumbersGrouped, value, line.METARField));
+
+            SuggestionsVersion++;
 
             return true;
         }

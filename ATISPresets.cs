@@ -24,6 +24,7 @@ namespace ATISPlugin
             {
                 ICAO = icao,
                 SingleRunwayFormat = matches.Select(x => x.SingleRunwayFormat).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)),
+                ReportCrosswindFrom = matches.Select(x => x.ReportCrosswindFrom).Where(x => x != PresetAirport.DefaultReportCrosswindFrom).DefaultIfEmpty(PresetAirport.DefaultReportCrosswindFrom).First(),
                 Modes = matches.SelectMany(x => x.Modes).ToList(),
                 Fields = matches.SelectMany(x => x.Fields).ToList(),
                 Defaults = matches.SelectMany(x => x.Defaults).GroupBy(x => x.Name).Select(x => x.First()).ToList()
@@ -38,6 +39,12 @@ namespace ATISPlugin
         public string ICAO { get; set; }
 
         public bool Covers(string icao) => (ICAO ?? string.Empty).Split(',').Any(x => x.Trim() == icao);
+
+        // Crosswind (kt) from which MX XW is added to WIND. Above 10kt by default; metro class D report from 5kt.
+        public const int DefaultReportCrosswindFrom = 11;
+
+        [XmlAttribute]
+        public int ReportCrosswindFrom { get; set; } = DefaultReportCrosswindFrom;
 
         // When set, adds a "RWY xx" mode for each runway, setting RWY to this text with {RWY} replaced.
         [XmlAttribute]

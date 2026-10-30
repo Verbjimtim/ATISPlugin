@@ -27,6 +27,8 @@
 
   <Default Name="DEPARTING VIA">...</Default> on <Airport> gives the starting value for a blank of that name.
 
+  ReportCrosswindFrom="5" on <Airport> adds MX XW to WIND from 5KT crosswind (default: above 10KT).
+
   ICAO="YMML,YPAD" on <Airport> applies the entry to several airports, combined with each one's own entry.
 
   SFC COND options (DRY, DAMP, WET, STANDING WATER, SNOW) are built in and don't need to be listed here.
@@ -142,7 +144,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YMML" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YMML">
     <Mode Name="27AD/34D">
       <Field Name="APCH">EXP GLS OR ILS APCH</Field>
       <Field Name="RWY">27 FOR ARR. RWY 34 FOR DEPS VIA MNG, NONIX, AND DOSEL, RWY 27 FOR ALL OTHER DEPS</Field>
@@ -164,16 +166,11 @@
       <Field Name="OPR INFO">LAHSO IN PROGRESS</Field>
     </Mode>
     <!-- Approach type by arrival runway. -->
-    <Presets Field="APCH" Modes="16A/27D,RWY 16">
+    <Presets Field="APCH" Modes="16A/27D">
       <Preset>EXP GLS OR ILS APCH</Preset>
       <Preset>EXP ILS APCH</Preset>
     </Presets>
-    <Presets Field="APCH" Modes="RWY 27">
-      <Preset>EXP GLS OR ILS APCH</Preset>
-    </Presets>
-    <Presets Field="APCH" Modes="RWY 09">
-      <Preset>EXP GLS OR RNP APCH</Preset>
-    </Presets>
+    <!-- Runway 34 arrivals. No mode has 34 alone for arrivals, so these show when no mode is selected. -->
     <Presets Field="APCH" Modes="RWY 34">
       <Preset>ACFT ON THE ALPHA STAR EXP GLS OR RNP APCH</Preset>
       <Preset>EXP GLS OR RNP APCH</Preset>
@@ -187,7 +184,7 @@
     <Default Name="OTHER RWY">27</Default>
   </Airport>
 
-  <Airport ICAO="YBBN" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YBBN">
     <Mode Name="01 PROPS" Priority="2">
       <Field Name="APCH">EXP INST APCH</Field>
       <Field Name="RWY">01L AND R FOR ARRS AND DEPS</Field>
@@ -213,7 +210,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YPPH" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YPPH">
     <Mode Name="SOUTHWEST PLAN">
       <Field Name="APCH">EXP ILS APCH RWY 21. EXP RNP APCH RWY 24</Field>
       <Field Name="RWY">21 AND RWY 24 FOR ARR. RWY 21 FOR DEP</Field>
@@ -223,7 +220,7 @@
       <Field Name="APCH" />
       <Field Name="RWY">03 FOR ARR. RWY 03 FOR DEP VIA OTLED, AVNEX, OLMAM, SOLUS AND OPEGA. RWY 06 FOR ALL OTHER DEP</Field>
     </Mode>
-    <Presets Field="APCH" Modes="NORTHEAST PLAN,RWY 03,RWY 06">
+    <Presets Field="APCH" Modes="NORTHEAST PLAN">
       <Preset>EXP ILS APCH</Preset>
       <Preset />
     </Presets>
@@ -232,7 +229,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YPAD" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YPAD">
     <Presets Field="APCH">
       <Preset>ACFT FM THE EAST AND JET ACFT FM THE WEST EXP INST APCH</Preset>
       <Preset>EXP INST APCH</Preset>
@@ -244,34 +241,34 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YBCS" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YBCS">
     <Presets Field="APCH">
       <Preset>EXP INSTR APCH</Preset>
       <Preset />
     </Presets>
   </Airport>
 
-  <Airport ICAO="YBCG" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YBCG">
     <Presets Field="APCH">
       <Preset>EXP INSTR APCH</Preset>
       <Preset />
     </Presets>
   </Airport>
 
-  <Airport ICAO="YSCB" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YSCB">
     <Presets Field="SIGWX" Multiple="true">
       <Preset>EXP TURB OVER RWY 17, S OF RWY INT</Preset>
       <Preset>EXP TURB OVER RWY 35, S OF RWY INT</Preset>
     </Presets>
   </Airport>
 
-  <Airport ICAO="YPDN" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YPDN">
     <Presets Field="OPR INFO" Multiple="true">
       <Preset>LAND AND HOLD SHORT OPERATIONS IN PROGRESS</Preset>
     </Presets>
   </Airport>
 
-  <Airport ICAO="YSWS" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YSWS">
     <Mode Name="RWY 23" Priority="1">
       <Field Name="APCH">EXP INST APCH</Field>
       <Field Name="RWY">23</Field>
@@ -293,7 +290,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YMES" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YMES">
     <Presets Field="OPR INFO" Multiple="true">
       <Preset>LOW FLYING AREA ACTIVE, LOWEST USEABLE LEVEL 3000FT</Preset>
       <Preset>ROULETTE TRAINING AREA SOUTH ACTIVE, LOWEST USEABLE LEVEL 7000FT</Preset>
@@ -301,26 +298,26 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YSNW" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YSNW">
     <Presets Field="OPR INFO" Multiple="true">
       <Preset>START APPROVAL REQ</Preset>
     </Presets>
   </Airport>
 
-  <Airport ICAO="YPEA" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YPEA">
     <Presets Field="OPR INFO" Multiple="true">
       <Preset>R 1 7 9 ACTIVE</Preset>
     </Presets>
   </Airport>
 
-  <Airport ICAO="YBSG" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YBSG">
     <Presets Field="OPR INFO" Multiple="true">
       <Preset>T R A SCHERGER ACTIVE</Preset>
       <Preset>SCHERGER MILITARY CONTROL ZONE ACTIVE</Preset>
     </Presets>
   </Airport>
 
-  <Airport ICAO="YWLM" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YWLM">
     <Presets Field="APCH">
       <Preset>MIL ACFT EXP STEREO APCH</Preset>
       <Preset />
@@ -332,13 +329,21 @@
   </Airport>
 
   <!-- ===================== Class D ===================== -->
+  <!-- Metro class D: MX XW is reported from 5KT (ReportCrosswindFrom). PROPS modes are split by direction,
+       with RWY giving that direction's runways from the SOP formats (which list both ends together). -->
 
-  <Airport ICAO="YBAF" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}">
-    <Mode Name="10/28 PROPS" Priority="1" Runways="10L,10R|28L,28R">
-      <Field Name="RWY">10L/28R FOR ARRS AND DEPS NORTH. RWY 10R/28L FOR ARRS AND DEPS SOUTH</Field>
+  <Airport ICAO="YBAF" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5">
+    <Mode Name="10 PROPS" Priority="1">
+      <Field Name="RWY">10L FOR ARRS AND DEPS NORTH. RWY 10R FOR ARRS AND DEPS SOUTH</Field>
     </Mode>
-    <Mode Name="10/28 PROPS (DUAL ADC)" Priority="1" Runways="10L,10R|28L,28R">
-      <Field Name="RWY">10L/28R FOR ARRS AND DEPS NORTH, FREQ 123.6. RWY 10R/28L FOR ARRS AND DEPS SOUTH, FREQ 118.1</Field>
+    <Mode Name="10 PROPS (DUAL ADC)" Priority="1">
+      <Field Name="RWY">10L FOR ARRS AND DEPS NORTH, FREQ 123.6. RWY 10R FOR ARRS AND DEPS SOUTH, FREQ 118.1</Field>
+    </Mode>
+    <Mode Name="28 PROPS" Priority="1">
+      <Field Name="RWY">28R FOR ARRS AND DEPS NORTH. RWY 28L FOR ARRS AND DEPS SOUTH</Field>
+    </Mode>
+    <Mode Name="28 PROPS (DUAL ADC)" Priority="1">
+      <Field Name="RWY">28R FOR ARRS AND DEPS NORTH, FREQ 123.6. RWY 28L FOR ARRS AND DEPS SOUTH, FREQ 118.1</Field>
     </Mode>
     <Mode Name="04 PROPS" Priority="2">
       <Field Name="APCH" />
@@ -356,7 +361,7 @@
       <Field Name="APCH" />
       <Field Name="RWY">EASTERN DEPS NAVBL. RWY 22R FOR ARRS AND DEPS NORTH AND WEST, FREQ 123.6. RWY 22L FOR ARRS SOUTH AND EAST AND DEPS SOUTH, FREQ 118.1</Field>
     </Mode>
-    <Presets Field="APCH" Modes="10/28 PROPS,10/28 PROPS (DUAL ADC),RWY 10L,RWY 28R">
+    <Presets Field="APCH" Modes="10 PROPS,10 PROPS (DUAL ADC),28 PROPS,28 PROPS (DUAL ADC),RWY 10L,RWY 28R">
       <Preset>EXP INST APCH</Preset>
       <Preset />
     </Presets>
@@ -365,12 +370,18 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YSBK" SingleRunwayFormat="{RWY}">
-    <Mode Name="11/29 PROPS" Priority="1" Runways="29R,29C,29L|11L,11C,11R">
-      <Field Name="RWY">11L/29R FOR ARRS AND DEPS. RWY 11R/29L FOR CCT TRAINING. RWY 11C/29C IN USE</Field>
+  <Airport ICAO="YSBK" ReportCrosswindFrom="5">
+    <Mode Name="29 PROPS" Priority="1">
+      <Field Name="RWY">29R FOR ARRS AND DEPS. RWY 29L FOR CCT TRAINING. RWY 29C IN USE</Field>
     </Mode>
-    <Mode Name="11/29 PROPS (DUAL ADC)" Priority="1" Runways="29R,29C,29L|11L,11C,11R">
-      <Field Name="RWY">11L/29R FOR ARRS AND DEPS, FREQ 132.8. RWY 11R/29L FOR CCT TRAINING, FREQ 123.6. RWY 11C/29C IN USE</Field>
+    <Mode Name="29 PROPS (DUAL ADC)" Priority="1">
+      <Field Name="RWY">29R FOR ARRS AND DEPS, FREQ 132.8. RWY 29L FOR CCT TRAINING, FREQ 123.6. RWY 29C IN USE</Field>
+    </Mode>
+    <Mode Name="11 PROPS" Priority="2">
+      <Field Name="RWY">11L FOR ARRS AND DEPS. RWY 11R FOR CCT TRAINING. RWY 11C IN USE</Field>
+    </Mode>
+    <Mode Name="11 PROPS (DUAL ADC)" Priority="2">
+      <Field Name="RWY">11L FOR ARRS AND DEPS, FREQ 132.8. RWY 11R FOR CCT TRAINING, FREQ 123.6. RWY 11C IN USE</Field>
     </Mode>
     <Presets Field="OPR INFO" Multiple="true">
       <Preset>CROSSWIND ALERT, DO NOT PASS THROUGH FINAL FOR YOUR ASSIGNED RUNWAY</Preset>
@@ -378,7 +389,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YSCN" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YSCN" ReportCrosswindFrom="5">
     <Presets Field="APCH">
       <Preset>EXP INST APCH</Preset>
       <Preset />
@@ -388,12 +399,18 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YPJT" SingleRunwayFormat="{RWY}">
-    <Mode Name="06/24 PROPS" Priority="1" Runways="06L,06R|24L,24R">
-      <Field Name="RWY">06R/24L FOR CCTS AND DEPS VIA ARMADALE SHOPS. RWY 06L/24R FOR ARRS AND ALL OTHER DEPS</Field>
+  <Airport ICAO="YPJT" ReportCrosswindFrom="5">
+    <Mode Name="06 PROPS" Priority="1">
+      <Field Name="RWY">06R FOR CCTS AND DEPS VIA ARMADALE SHOPS. RWY 06L FOR ARRS AND ALL OTHER DEPS</Field>
     </Mode>
-    <Mode Name="06/24 PROPS (DUAL ADC)" Priority="1" Runways="06L,06R|24L,24R">
-      <Field Name="RWY">06R/24L FOR CCTS AND DEPS VIA ARMADALE SHOPS, FREQ 119.4. RWY 06L/24R FOR ARRS AND ALL OTHER DEPS, FREQ 118.1</Field>
+    <Mode Name="06 PROPS (DUAL ADC)" Priority="1">
+      <Field Name="RWY">06R FOR CCTS AND DEPS VIA ARMADALE SHOPS, FREQ 119.4. RWY 06L FOR ARRS AND ALL OTHER DEPS, FREQ 118.1</Field>
+    </Mode>
+    <Mode Name="24 PROPS" Priority="1">
+      <Field Name="RWY">24L FOR CCTS AND DEPS VIA ARMADALE SHOPS. RWY 24R FOR ARRS AND ALL OTHER DEPS</Field>
+    </Mode>
+    <Mode Name="24 PROPS (DUAL ADC)" Priority="1">
+      <Field Name="RWY">24L FOR CCTS AND DEPS VIA ARMADALE SHOPS, FREQ 119.4. RWY 24R FOR ARRS AND ALL OTHER DEPS, FREQ 118.1</Field>
     </Mode>
     <Mode Name="06L NIGHT" AutoSelect="false">
       <Field Name="RWY">06L RIGHT CCT</Field>
@@ -403,23 +420,59 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YMMB" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}">
-    <Mode Name="PROPS" Priority="1" Runways="17L,17R|35L,35R|13L,13R|31L,31R">
-      <Field Name="RWY">13L/17L/31R/35R FOR ARRS AND DEPS EAST. RWY 13R/17R/31L/35L FOR ARRS AND DEPS WEST</Field>
+  <Airport ICAO="YMMB" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5">
+    <Mode Name="17 PROPS" Priority="1">
+      <Field Name="RWY">17L FOR ARRS AND DEPS EAST. RWY 17R FOR ARRS AND DEPS WEST</Field>
     </Mode>
-    <Mode Name="PROPS (DUAL ADC)" Priority="1" Runways="17L,17R|35L,35R|13L,13R|31L,31R">
-      <Field Name="RWY">13L/17L/31R/35R FOR ARRS AND DEPS EAST, FREQ 118.1. RWY 13R/17R/31L/35L FOR ARRS AND DEPS WEST, FREQ 123.0</Field>
+    <Mode Name="17 PROPS (DUAL ADC)" Priority="1">
+      <Field Name="RWY">17L FOR ARRS AND DEPS EAST, FREQ 118.1. RWY 17R FOR ARRS AND DEPS WEST, FREQ 123.0</Field>
+    </Mode>
+    <Mode Name="35 PROPS" Priority="1">
+      <Field Name="RWY">35R FOR ARRS AND DEPS EAST. RWY 35L FOR ARRS AND DEPS WEST</Field>
+    </Mode>
+    <Mode Name="35 PROPS (DUAL ADC)" Priority="1">
+      <Field Name="RWY">35R FOR ARRS AND DEPS EAST, FREQ 118.1. RWY 35L FOR ARRS AND DEPS WEST, FREQ 123.0</Field>
+    </Mode>
+    <Mode Name="13 PROPS" Priority="2">
+      <Field Name="RWY">13L FOR ARRS AND DEPS EAST. RWY 13R FOR ARRS AND DEPS WEST</Field>
+    </Mode>
+    <Mode Name="13 PROPS (DUAL ADC)" Priority="2">
+      <Field Name="RWY">13L FOR ARRS AND DEPS EAST, FREQ 118.1. RWY 13R FOR ARRS AND DEPS WEST, FREQ 123.0</Field>
+    </Mode>
+    <Mode Name="31 PROPS" Priority="2">
+      <Field Name="RWY">31R FOR ARRS AND DEPS EAST. RWY 31L FOR ARRS AND DEPS WEST</Field>
+    </Mode>
+    <Mode Name="31 PROPS (DUAL ADC)" Priority="2">
+      <Field Name="RWY">31R FOR ARRS AND DEPS EAST, FREQ 118.1. RWY 31L FOR ARRS AND DEPS WEST, FREQ 123.0</Field>
     </Mode>
   </Airport>
 
-  <Airport ICAO="YPPF" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}">
-    <Mode Name="PROPS" Priority="1" Runways="03L,03R|21L,21R|08L,08R|26L,26R">
-      <Field Name="RWY">03R/08R/21L/26L FOR ARRS AND DEPS EAST. RWY 03L/08L/21R/26R FOR ARRS AND DEPS WEST</Field>
+  <Airport ICAO="YPPF" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5">
+    <Mode Name="03 PROPS" Priority="1">
+      <Field Name="RWY">03R FOR ARRS AND DEPS EAST. RWY 03L FOR ARRS AND DEPS WEST</Field>
     </Mode>
-    <Mode Name="PROPS (DUAL ADC)" Priority="1" Runways="03L,03R|21L,21R|08L,08R|26L,26R">
-      <Field Name="RWY">03R/08R/21L/26L FOR ARRS AND DEPS EAST, FREQ 118.7. RWY 03L/08L/21R/26R FOR ARRS AND DEPS WEST, FREQ 124.6</Field>
+    <Mode Name="03 PROPS (DUAL ADC)" Priority="1">
+      <Field Name="RWY">03R FOR ARRS AND DEPS EAST, FREQ 118.7. RWY 03L FOR ARRS AND DEPS WEST, FREQ 124.6</Field>
     </Mode>
-    <Presets Field="APCH" Modes="PROPS,PROPS (DUAL ADC),RWY 21R">
+    <Mode Name="21 PROPS" Priority="1">
+      <Field Name="RWY">21L FOR ARRS AND DEPS EAST. RWY 21R FOR ARRS AND DEPS WEST</Field>
+    </Mode>
+    <Mode Name="21 PROPS (DUAL ADC)" Priority="1">
+      <Field Name="RWY">21L FOR ARRS AND DEPS EAST, FREQ 118.7. RWY 21R FOR ARRS AND DEPS WEST, FREQ 124.6</Field>
+    </Mode>
+    <Mode Name="08 PROPS" Priority="2">
+      <Field Name="RWY">08R FOR ARRS AND DEPS EAST. RWY 08L FOR ARRS AND DEPS WEST</Field>
+    </Mode>
+    <Mode Name="08 PROPS (DUAL ADC)" Priority="2">
+      <Field Name="RWY">08R FOR ARRS AND DEPS EAST, FREQ 118.7. RWY 08L FOR ARRS AND DEPS WEST, FREQ 124.6</Field>
+    </Mode>
+    <Mode Name="26 PROPS" Priority="2">
+      <Field Name="RWY">26L FOR ARRS AND DEPS EAST. RWY 26R FOR ARRS AND DEPS WEST</Field>
+    </Mode>
+    <Mode Name="26 PROPS (DUAL ADC)" Priority="2">
+      <Field Name="RWY">26L FOR ARRS AND DEPS EAST, FREQ 118.7. RWY 26R FOR ARRS AND DEPS WEST, FREQ 124.6</Field>
+    </Mode>
+    <Presets Field="APCH" Modes="21 PROPS,21 PROPS (DUAL ADC),RWY 21R">
       <Preset>EXP INST APCH</Preset>
       <Preset />
     </Presets>
@@ -427,7 +480,7 @@
 
   <!-- ===================== Procedural ===================== -->
 
-  <Airport ICAO="YSTW" SingleRunwayFormat="{RWY}">
+  <Airport ICAO="YSTW">
     <Mode Name="12 PROPS" Priority="1">
       <Field Name="RWY">12L AND R FOR ARRS AND DEPS</Field>
       <Field Name="OPR INFO">SIMUL PARL RWY OPS IN USE. EXP TFC ON FINAL AND OPP BASE OF THE PARL RWY</Field>
