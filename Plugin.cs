@@ -32,7 +32,6 @@ namespace ATISPlugin
         private const string ZuluFile = "Zulu.json";
         private const string CodesFile = "Codes.json";
         private const string PresetsFile = "ATISPresets.xml";
-        private const string PresetOptionsFile = "Presets.json";
         private const string OFCWFile = "OFCW.json";
 
         private static readonly HttpClient Client = new HttpClient();
@@ -94,7 +93,6 @@ namespace ATISPlugin
         public static List<ZuluInfo> ZuluInfo { get; set; } = new List<ZuluInfo>();
         public static List<OFCWInfo> OFCWInfo { get; set; } = new List<OFCWInfo>();
         public static List<CodeBlock> CodeBlocks { get; set; } = new List<CodeBlock>();
-        public static List<PresetOption> PresetOptions { get; set; } = new List<PresetOption>();
 
         public static SoundPlayer SoundPlayer { get; set; } = new SoundPlayer();
         private static Timer BroadcastTimer { get; set; } = new Timer();
@@ -170,8 +168,6 @@ namespace ATISPlugin
             _ = GetOFCWInfo();
 
             _ = GetCodeBlocks();
-
-            _ = GetPresetOptions();
 
             _ = GetPresets();
         }
@@ -285,24 +281,6 @@ namespace ATISPlugin
             }
         }
 
-        private static async Task GetPresetOptions()
-        {
-            try
-            {
-                var response = await GetConfigFile(PresetOptionsFile);
-
-                var presetOptions = JsonConvert.DeserializeObject<PresetOption[]>(response);
-
-                foreach (var presetOption in presetOptions)
-                {
-                    PresetOptions.Add(presetOption);
-                }
-            }
-            catch (Exception ex)
-            {
-                Errors.Add(new Exception(ex.Message), DisplayName);
-            }
-        }
 
         private static async Task GetZuluInfo()
         {
