@@ -1637,7 +1637,20 @@ namespace ATISPlugin
             ID = ComboBoxLetter.Items[nextIndex].ToString()[0];
         }
 
-        private async void ButtonCreate_Click(object sender, EventArgs e)
+        // Button handlers are async void, where an exception would take vatSys down, so it's reported instead.
+        private static async Task Safely(string action, Func<Task> work)
+        {
+            try
+            {
+                await work();
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not {action}: {ex.Message}"), Plugin.DisplayName);
+            }
+        }
+
+        private async void ButtonCreate_Click(object sender, EventArgs e) => await Safely("create ATIS", async () =>
         {
             if (!Network.IsConnected || !Network.IsValidATC) return;
 
@@ -1654,7 +1667,7 @@ namespace ATISPlugin
             LoadRunways();
 
             GetMetar();
-        }
+        });
 
         private void ComboBoxAirport_SelectedIndexChanged(object sender, EventArgs e)
         {
@@ -1682,12 +1695,12 @@ namespace ATISPlugin
             LoadModes();
         }
 
-        private async void ButtonDelete_Click(object sender, EventArgs e)
+        private async void ButtonDelete_Click(object sender, EventArgs e) => await Safely("delete ATIS", async () =>
         {
             await Control.Delete();
 
             Change(Number);
-        }
+        });
 
         private void ButtonGetMetar_Click(object sender, EventArgs e)
         {
@@ -1716,12 +1729,12 @@ namespace ATISPlugin
             IncreaseID();
         }
 
-        private async void ButtonSave_Click(object sender, EventArgs e)
+        private async void ButtonSave_Click(object sender, EventArgs e) => await Safely("save ATIS", async () =>
         {
             RefreshForm_ClearWindCalculator();
 
             await SaveATIS();
-        }
+        });
 
         private async Task SaveATIS()
         {
@@ -1740,7 +1753,7 @@ namespace ATISPlugin
             RefreshForm();
         }
 
-        private async void ButtonBroadcast_Click(object sender, EventArgs e)
+        private async void ButtonBroadcast_Click(object sender, EventArgs e) => await Safely("broadcast ATIS", async () =>
         {
             if (!Control.Broadcasting)
             {
@@ -1754,7 +1767,7 @@ namespace ATISPlugin
             }
 
             RefreshForm();
-        }
+        });
 
         private void TextBox_TextChanged(object sender, EventArgs e)
         {

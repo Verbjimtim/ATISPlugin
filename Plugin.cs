@@ -137,6 +137,9 @@ namespace ATISPlugin
                 TimedUpdatesTimer.Interval = TimeSpan.FromMinutes(1).TotalMilliseconds;
                 TimedUpdatesTimer.AutoReset = true;
                 TimedUpdatesTimer.Start();
+
+                // Only once the ATIS exist to take the METARs.
+                MET.Instance.ProductsChanged += METARChanged;
             }
             catch (Exception ex)
             {
@@ -151,9 +154,9 @@ namespace ATISPlugin
             _ = GetPresets();
 
             _ = CheckVersion();
-
-            MET.Instance.ProductsChanged += METARChanged;
         }
+
+        private static IEnumerable<ATISControl> AllATIS => new[] { ATIS1, ATIS2, ATIS3, ATIS4 }.Where(x => x != null);
 
         // Handled on the GUI thread, like the timed updates, as it changes the suggestions and can open the editor.
         private void METARChanged(object sender, MET.ProductsChangedEventArgs e)
@@ -194,14 +197,7 @@ namespace ATISPlugin
             }
         }
 
-        private ATISControl GetATIS(string icao)
-        {
-            if (ATIS1.ICAO == icao) return ATIS1;
-            if (ATIS2.ICAO == icao) return ATIS2;
-            if (ATIS3.ICAO == icao) return ATIS3;
-            if (ATIS4.ICAO == icao) return ATIS4;
-            return null;
-        }
+        private ATISControl GetATIS(string icao) => AllATIS.FirstOrDefault(x => x.ICAO == icao);
 
         private static async Task CheckVersion()
         {
@@ -303,31 +299,41 @@ namespace ATISPlugin
             }
         }
 
+        // An exception escaping an async void handler would take vatSys down, so each one catches everything.
         private async void BroadcastTimer_Elasped(object sender, ElapsedEventArgs e)
         {
-            var toBroadcast = ToBroadcast.ToList();
-
-            foreach (var atb in toBroadcast)
+            try
             {
-                var atis = ToBroadcast.FirstOrDefault(x => x.Id == atb.Id);
+                var toBroadcast = ToBroadcast.ToList();
 
-                if (atis != null) ToBroadcast.Remove(atis);
-
-                if (!Network.IsOfficialServer) continue;
-
-                if (!Network.GetATISConnected(atb.ATISIndex)) continue;
-
-                try
+                foreach (var atb in toBroadcast)
                 {
-                    await AFV.AddOrUpdateATISBot(atb.Audio, atb.ATISIndex, atb.Callsign, atb.Frequency, atb.VisPoint, atb.Duration);
-                }
-                catch (Exception ex)
-                {
-                    Errors.Add(new Exception($"Could not start voice ATIS: {ex.Message}"), DisplayName);
+                    var atis = ToBroadcast.FirstOrDefault(x => x.Id == atb.Id);
+
+                    if (atis != null) ToBroadcast.Remove(atis);
+
+                    if (!Network.IsOfficialServer) continue;
+
+                    if (!Network.GetATISConnected(atb.ATISIndex)) continue;
+
+                    try
+                    {
+                        await AFV.AddOrUpdateATISBot(atb.Audio, atb.ATISIndex, atb.Callsign, atb.Frequency, atb.VisPoint, atb.Duration);
+                    }
+                    catch (Exception ex)
+                    {
+                        Errors.Add(new Exception($"Could not start voice ATIS: {ex.Message}"), DisplayName);
+                    }
                 }
             }
-
-            BroadcastTimer.Start();
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not broadcast ATIS: {ex.Message}"), DisplayName);
+            }
+            finally
+            {
+                if (!Disposed) BroadcastTimer.Start();
+            }
         }
 
         // SFC COND clearing and windshear expiry are time based, so check them every minute. The timer runs on a
@@ -348,10 +354,8 @@ namespace ATISPlugin
         {
             try
             {
-                foreach (var atis in new[] { ATIS1, ATIS2, ATIS3, ATIS4 })
+                foreach (var atis in AllATIS)
                 {
-                    if (atis == null) continue;
-
                     if (atis.CheckTimedUpdates(DateTime.UtcNow)) OnMETARUpdate(atis.Number, true);
                 }
             }
@@ -386,12 +390,25 @@ namespace ATISPlugin
 
         private async void Network_Disconnected(object sender, EventArgs e)
         {
+            await DeleteAll();
+        }
+
+        // Each ATIS is deleted on its own, so one failing doesn't leave the others connected.
+        private static async Task DeleteAll()
+        {
             ToBroadcast.Clear();
-            
-            await ATIS1?.Delete();
-            await ATIS2?.Delete();
-            await ATIS3?.Delete();
-            await ATIS4?.Delete();
+
+            foreach (var atis in AllATIS.ToList())
+            {
+                try
+                {
+                    await atis.Delete();
+                }
+                catch (Exception ex)
+                {
+                    Errors.Add(new Exception($"Could not delete ATIS {atis.Number}: {ex.Message}"), DisplayName);
+                }
+            }
         }
 
         private void OnUpdate(object sender, EventArgs e)
@@ -502,9 +519,25 @@ namespace ATISPlugin
             return;
         }
 
+        private static bool Disposed { get; set; }
+
         public void Dispose()
         {
-            Network_Disconnected(this, null);
+            Disposed = true;
+
+            try
+            {
+                MET.Instance.ProductsChanged -= METARChanged;
+
+                BroadcastTimer.Stop();
+                BroadcastTimer.Dispose();
+
+                TimedUpdatesTimer.Stop();
+                TimedUpdatesTimer.Dispose();
+            }
+            catch { }
+
+            _ = DeleteAll();
         }
     }
 }
