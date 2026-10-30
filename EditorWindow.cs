@@ -244,20 +244,17 @@ namespace ATISPlugin
         private bool IsMultiple(string fieldName) => PresetAirport != null && PresetAirport.IsMultiple(fieldName);
 
         // Options for a field's arrow button: built in SFC COND options, then presets from ATISPresets.xml.
+        // A blank option always comes first.
         private List<string> GetOptions(ATISLine line)
         {
             var options = new List<string>();
 
             if (line.Name == SurfaceCondition.Field)
             {
-                var saved = PresetAirport.Clean(line.Value);
-
-                // DRY is only reported after the runway was last reported as something else.
-                if (!string.IsNullOrEmpty(saved) && saved != SurfaceCondition.Dry) options.Add(SurfaceCondition.Dry);
-
+                // DRY can be picked by hand to report the runway drying (it goes out on one ATIS, then clears).
+                options.Add(string.Empty);
+                options.Add(SurfaceCondition.Dry);
                 options.AddRange(SurfaceCondition.Conditions.Reverse());
-
-                if (saved == SurfaceCondition.Dry) options.Add(string.Empty);
             }
 
             if (PresetAirport != null)
@@ -278,10 +275,12 @@ namespace ATISPlugin
 
             // Without a runway mode, any single runway can be nominated. Airports with SingleRunwayFormat
             // already have these as modes, whose values are listed above.
-            if (line.Name == "RWY" && string.IsNullOrEmpty(Mode) &&string.IsNullOrWhiteSpace(PresetAirport?.SingleRunwayFormat))
+            if (line.Name == "RWY" && string.IsNullOrEmpty(Mode) && string.IsNullOrWhiteSpace(PresetAirport?.SingleRunwayFormat))
             {
                 options.AddRange(GetRunwayNames().Where(x => !options.Contains(x)));
             }
+
+            if (options.Remove(string.Empty)) options.Insert(0, string.Empty);
 
             return options;
         }

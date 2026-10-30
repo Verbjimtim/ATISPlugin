@@ -52,7 +52,8 @@
 
   ICAO="YMML,YPAD" on <Airport> applies the entry to several airports, combined with each one's own entry.
 
-  SFC COND options (DRY, DAMP, WET, STANDING WATER, SNOW) are built in and don't need to be listed here.
+  SFC COND options (blank, DRY, DAMP, WET, STANDING WATER, SNOW) are built in and don't need to be listed here.
+  A blank option is always listed first in any field that has one.
   SFC COND is raised from WX precipitation; once it stops, DRY is suggested after 30 min (DAMP), 1 hour (WET,
   STANDING WATER) or 2 hours (SNOW), goes out on one ATIS, then clears. Windshear in SIGWX (ending
   "AT TIME hhmm") is suggested for removal an hour after the reported time.
