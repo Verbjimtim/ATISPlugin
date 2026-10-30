@@ -5,7 +5,10 @@
 		<AssemblyName>ATISPlugin</AssemblyName>
 		<PlatformTarget>x86</PlatformTarget>
 		<ProgramFilesX86>$(MSBuildProgramFiles32)</ProgramFilesX86>
-		<BaseOutputPath>C:\Users\$(USERNAME)\OneDrive\Documents\vatSys Files\Profiles\Australia\Plugins\ATIS</BaseOutputPath>
+		<OutputPath>C:\Users\ajdun\OneDrive\Documents\vatSys Files\Profiles\Australia\Plugins\ATIS Plugin</OutputPath>
+		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+		<AssemblyVersion>4.0</AssemblyVersion>
+		<FileVersion>4.0</FileVersion>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -29,12 +32,12 @@
 	</ItemGroup>
 	<ItemGroup>
 		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-		<PackageReference Include="NAudio" Version="2.2.1" />
-		<PackageReference Include="NAudio.WinForms" Version="2.2.1" />
-	</ItemGroup>
-	<ItemGroup>
-	  <None Update="Version.json">
-	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-	  </None>
+		<PackageReference Include="NAudio.Core" Version="2.2.1" />
+		<PackageReference Include="NAudio.WinMM" Version="2.2.1" />
+		<!-- Pulled in by NAudio but never loaded from the plugin folder: vatSys ships newer
+		     copies and redirects to them, so keep these out of the build output. -->
+		<PackageReference Include="Microsoft.Win32.Registry" Version="4.7.0" ExcludeAssets="runtime" />
+		<PackageReference Include="System.Security.AccessControl" Version="4.7.0" ExcludeAssets="runtime" />
+		<PackageReference Include="System.Security.Principal.Windows" Version="4.7.0" ExcludeAssets="runtime" />
 	</ItemGroup>
 </Project>

@@ -1,4 +1,5 @@
-﻿using NAudio.Wave;
+﻿using NAudio.Utils;
+using NAudio.Wave;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -33,16 +34,12 @@ namespace ATISPlugin
 
         public bool Broadcasting { get; set; }
         public bool Listening { get; set; }
-        public bool CanListen => !string.IsNullOrWhiteSpace(FileName);
-        public string FileName { get; set; }
+        public bool CanListen => AudioWav != null && !Recording;
+        public byte[] AudioWav { get; private set; }
         public DateTime DateTimeUtc { get; set; }
         public bool TimeCheck { get; set; } = true;
         public List<ATISLine> Lines { get; set; } = new List<ATISLine>();
-        private double ATISDuration { get; set; }
         private MemoryStream ATISStream;
-        private MemoryStream TimeCheckStream;
-        private double CompleteATISDuration { get; set; }
-        private MemoryStream CompleteStream;
         public List<ATISLine> SuggestedLines { get; set; } = new List<ATISLine>();
         public bool HasUpdates => SuggestedLines.Any();
         // Goes up each time new suggestions arrive (a METAR or a timed update), so the editor knows to apply them.
@@ -52,7 +49,7 @@ namespace ATISPlugin
         private SpeechAudioFormatInfo SpeechFormat { get; set; }
         public string METARRaw { get; set; }
         public string METARLastRaw { get; set; }
-        private WaveFormat WaveForm { get; set; } = new WaveFormat(44100, 1);
+        private WaveFormat WaveForm { get; set; } = new WaveFormat(48000, 1);
         public PromptRate PromptRate { get; set; } = PromptRate.Medium;
         public InstalledVoice InstalledVoice => SpeechSynth.GetInstalledVoices().FirstOrDefault(x => x.VoiceInfo.Name == VoiceName);
         public string VoiceName { get; set; }
@@ -163,7 +160,16 @@ namespace ATISPlugin
         {
             if (!Broadcasting) return;
 
-            BroadcastStart();
+            try
+            {
+                BroadcastAudio();
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not broadcast ATIS: {ex.Message}"), Plugin.DisplayName);
+
+                Broadcasting = false;
+            }
         }
 
         public async Task Create(string icao, string frequency, Coordinate coordinates)
@@ -171,6 +177,13 @@ namespace ATISPlugin
             if (!Network.IsConnected || !Network.IsValidATC) return;
 
             if (Network.GetATISConnected(Index)) return;
+
+            if (Number != 1 && Plugin.SingleATISOnly)
+            {
+                Errors.Add(new Exception("Only one ATIS is allowed for this position."), Plugin.DisplayName);
+
+                return;
+            }
 
             try
             {
@@ -192,6 +205,15 @@ namespace ATISPlugin
                 Callsign = $"{icao}_ATIS";
                 VisPoint = coordinates;
                 IsZulu = false;
+
+                var ofcwDefault = Plugin.OFCWInfo.FirstOrDefault(x => x.ICAO == icao);
+                
+                var ofcwLine = Lines.FirstOrDefault(x => x.Name == "OFCW_NOTIFY");
+
+                if (ofcwLine != null)
+                {
+                   ofcwLine.Value = ofcwDefault == null ? $"{ICAO} {ofcwLine.Value}" : ofcwDefault.Text;
+                }
 
                 Network.ConnectATIS(Index, Callsign, ICAO, FSDFrequency, VisPoint);
             }
@@ -246,6 +268,12 @@ namespace ATISPlugin
 
             SuggestedLines.Clear();
 
+            CleanupRecording();
+
+            DiscardRecordingStream();
+
+            AudioWav = null;
+
             SoundPlayer.Stop();
 
             StatusChanged?.Invoke(this, null);
@@ -295,9 +323,9 @@ namespace ATISPlugin
 
                 ATISStream = new MemoryStream();
 
-                ATISDuration = SetContent(ATISSpoken, ref ATISStream);
+                SetContent(ATISSpoken, ref ATISStream);
 
-                GenerateAutoFile();
+                GenerateAutoAudio();
             }
             else
             {
@@ -313,15 +341,18 @@ namespace ATISPlugin
 
             Listening = true;
 
-            var directory = Path.Combine(Plugin.DatasetPath, "Temp");
+            try
+            {
+                SoundPlayer.Stream = new MemoryStream(AudioWav);
 
-            var file = Path.Combine(directory, FileName);
+                SoundPlayer.Play();
+            }
+            catch (Exception ex)
+            {
+                Listening = false;
 
-            if (!File.Exists(file)) return;
-
-            SoundPlayer.SoundLocation = file;
-
-            SoundPlayer.Play();
+                Errors.Add(new Exception($"Could not play ATIS: {ex.Message}"), Plugin.DisplayName);
+            }
         }
 
         public void ListenStop()
@@ -339,36 +370,7 @@ namespace ATISPlugin
 
                 Network.UpdateATIS(Index, ID, GetInfo());
 
-                if (VoiceName == Plugin.ManualVoiceName)
-                {
-                    var directory = Path.Combine(Plugin.DatasetPath, "Temp");
-
-                    var file = Path.Combine(directory, FileName);
-
-                    var audio = File.ReadAllBytes(file);
-
-                    var atisAudio = new ATISAudio(audio, Index, Callsign, Frequency, VisPoint, TimeSpan.Zero);
-
-                    Plugin.ToBroadcast.Add(atisAudio);
-                }
-                else
-                {
-                    CompleteATISDuration = GenerateCompleteStream();
-
-                    var audio = ReadMemoryStream(CompleteStream);
-
-                    var duration = TimeCheck ? TimeSpan.FromMilliseconds(CompleteATISDuration + 60000.0) : TimeSpan.Zero;
-
-                    var atisAudio = new ATISAudio(audio, Index, Callsign, Frequency, VisPoint, duration);
-
-                    Plugin.ToBroadcast.Add(atisAudio);
-
-                    if (!TimeCheck) return;
-
-                    LoopTimer.Interval = CompleteATISDuration;
-
-                    LoopTimer.Start();
-                }
+                BroadcastAudio();
             }
             catch (Exception ex)
             {
@@ -376,8 +378,75 @@ namespace ATISPlugin
 
                 Broadcasting = false;
             }
+        }
 
+        private static readonly TimeSpan LoopGap = TimeSpan.FromSeconds(3.0);
 
+        private void BroadcastAudio()
+        {
+            byte[] atisPcm;
+
+            if (VoiceName == Plugin.ManualVoiceName)
+            {
+                if (Recording) throw new Exception("Recording still in progress.");
+
+                if (AudioWav == null) throw new Exception("No recording available.");
+
+                // AFV expects raw PCM samples, so strip the WAV container.
+                using (var reader = new WaveFileReader(new MemoryStream(AudioWav)))
+                using (var ms = new MemoryStream())
+                {
+                    reader.CopyTo(ms);
+                    atisPcm = ms.ToArray();
+                }
+            }
+            else
+            {
+                if (ATISStream == null) throw new Exception("No ATIS audio available.");
+
+                atisPcm = ReadMemoryStream(ATISStream);
+            }
+
+            var atisDuration = PcmDuration(atisPcm);
+
+            var timeCheckPcm = TimeCheck ? GenerateTimeCheckPcm(atisDuration) : null;
+
+            byte[] audio;
+
+            if (timeCheckPcm != null)
+            {
+                audio = new byte[atisPcm.Length + timeCheckPcm.Length];
+                Buffer.BlockCopy(atisPcm, 0, audio, 0, atisPcm.Length);
+                Buffer.BlockCopy(timeCheckPcm, 0, audio, atisPcm.Length, timeCheckPcm.Length);
+            }
+            else
+            {
+                audio = atisPcm;
+            }
+
+            var completeDuration = PcmDuration(audio);
+
+            var interval = completeDuration + LoopGap;
+
+            if (timeCheckPcm != null)
+            {
+                LoopTimer.Interval = completeDuration.TotalMilliseconds + 1000.0;
+
+                LoopTimer.Start();
+            }
+            else
+            {
+                LoopTimer.Stop();
+            }
+
+            Plugin.ToBroadcast.Enqueue(new ATISAudio(audio, Index, Callsign, Frequency, VisPoint, interval));
+
+            Plugin.BroadcastNow();
+        }
+
+        private TimeSpan PcmDuration(byte[] pcm)
+        {
+            return TimeSpan.FromSeconds((double)pcm.Length / WaveForm.AverageBytesPerSecond);
         }
 
         public static byte[] ReadMemoryStream(Stream input)
@@ -394,6 +463,8 @@ namespace ATISPlugin
         public async Task BroadcastStop()
         {
             Broadcasting = false;
+
+            LoopTimer.Stop();
 
             try
             {
@@ -795,7 +866,7 @@ namespace ATISPlugin
             SpeechSynth.Speak(speech);
             SpeechSynth.SetOutputToNull();
             stream.Seek(0L, SeekOrigin.Begin);
-            return stream.Length / WaveForm.AverageBytesPerSecond * 1000.0;
+            return (double)stream.Length / WaveForm.AverageBytesPerSecond * 1000.0;
         }
 
         private void GenerateSpoken()
@@ -833,7 +904,7 @@ namespace ATISPlugin
 
                     if (line.Name == "OFCW_NOTIFY")
                     {
-                        speech = DoReplacements(speech, $"On first contact with {ICAO} {line.Value}, notify receipt of information {ID}", line.NumbersGrouped);
+                        speech = DoReplacements(speech, $"On first contact with {line.Value}, notify receipt of information {ID}", line.NumbersGrouped);
                     }
                     else
                     {
@@ -851,132 +922,202 @@ namespace ATISPlugin
             ATISSpoken = speech;
         }
 
-        private void GenerateTimeCheck()
+        private byte[] GenerateTimeCheckPcm(TimeSpan atisDuration)
         {
-            if (InstalledVoice == null) return;
+            // The manual voice has no TTS voice of its own, so the timecheck
+            // falls back to the first installed voice.
+            var voice = InstalledVoice ?? SpeechSynth.GetInstalledVoices().FirstOrDefault();
+
+            if (voice == null) return null;
 
             PromptBuilder speech = new PromptBuilder(CultureInfo);
-            speech.StartVoice(InstalledVoice.VoiceInfo.Name);
+            speech.StartVoice(voice.VoiceInfo.Name);
             speech.StartStyle(new PromptStyle(PromptRate));
             speech.AppendBreak(TimeSpan.FromSeconds(3.0));
-            speech.AppendText(CreateTimecheckText(TimeSpan.FromMilliseconds(ATISDuration) + TimeSpan.FromSeconds(7.0)));
+            speech.AppendText(CreateTimecheckText(atisDuration + TimeSpan.FromSeconds(7.0)));
             speech.EndStyle();
             speech.EndVoice();
-            SetTimeCheckContent(speech);
+
+            var stream = new MemoryStream();
+            SetContent(speech, ref stream);
+            return stream.ToArray();
         }
 
         private string CreateTimecheckText(TimeSpan offset)
         {
-            DateTime nearest = (DateTime.UtcNow + offset).RoundToNearest(TimeSpan.FromSeconds(30.0));
+            // Speak the time at which the timecheck will actually be heard,
+            // rounded up or down to the nearest 30 seconds.
+            DateTime nearest = RoundToNearestHalfMinute(DateTime.UtcNow + offset);
             string timecheckText = "Time check, " + nearest.ToString("HHmm").Aggregate<char, string>(string.Empty, (Func<string, char, string>)((c, i) => c + i.ToString() + " "));
             if (nearest.Second == 30)
                 timecheckText += " and a half.";
             return timecheckText;
         }
 
-        private double SetTimeCheckContent(PromptBuilder speech)
+        private static DateTime RoundToNearestHalfMinute(DateTime time)
         {
-            TimeCheckStream = new MemoryStream();
-            return SetContent(speech, ref TimeCheckStream);
+            var halfMinute = TimeSpan.FromSeconds(30.0).Ticks;
+
+            var rounded = (long)Math.Round((double)time.Ticks / halfMinute, MidpointRounding.AwayFromZero) * halfMinute;
+
+            return new DateTime(rounded, time.Kind);
         }
 
-        private double GenerateCompleteStream()
-        {
-            CompleteStream = new MemoryStream();
-
-            ATISStream.Seek(0, SeekOrigin.Begin);
-            ATISStream.CopyTo(CompleteStream);
-
-            CompleteStream.Seek(0, SeekOrigin.End);
-
-            if (TimeCheck)
-            {
-                GenerateTimeCheck();
-                TimeCheckStream.Seek(0, SeekOrigin.Begin);
-                TimeCheckStream.CopyTo(CompleteStream);
-            }
-
-            return CompleteStream.Length / WaveForm.AverageBytesPerSecond * 1000.0;
-        }
-
-        private WaveFileWriter writer; 
+        private WaveFileWriter writer;
         private WaveInEvent waveIn;
+        private MemoryStream recordingStream;
+        private bool playOnRecordingStopped;
 
         public void StartRecording()
         {
-            FileName = $"{ICAO}_{ID}_{DateTime.UtcNow:HHmmss}.wav";
-
-            var directory = Path.Combine(Plugin.DatasetPath, "Temp");
-
-            var file = Path.Combine(directory, FileName);
-
-            if (!Directory.Exists(directory)) Directory.CreateDirectory(directory);
-
-            waveIn = new WaveInEvent
+            try
             {
-                WaveFormat = WaveForm
-            };
+                CleanupRecording();
 
-            writer = new WaveFileWriter(file, waveIn.WaveFormat);
+                DiscardRecordingStream();
 
-            waveIn.StartRecording();
+                recordingStream = new MemoryStream();
 
-            waveIn.DataAvailable += WaveIn_DataAvailable;
-            waveIn.RecordingStopped += WaveIn_RecordingStopped;
+                playOnRecordingStopped = false;
 
-            Recording = true;
+                waveIn = new WaveInEvent
+                {
+                    WaveFormat = WaveForm
+                };
+
+                writer = new WaveFileWriter(new IgnoreDisposeStream(recordingStream), waveIn.WaveFormat);
+
+                waveIn.DataAvailable += WaveIn_DataAvailable;
+                waveIn.RecordingStopped += WaveIn_RecordingStopped;
+
+                waveIn.StartRecording();
+
+                Recording = true;
+            }
+            catch (Exception ex)
+            {
+                CleanupRecording();
+
+                DiscardRecordingStream();
+
+                Errors.Add(new Exception($"Could not start recording: {ex.Message}"), Plugin.DisplayName);
+            }
+        }
+
+        private void DiscardRecordingStream()
+        {
+            recordingStream?.Dispose();
+            recordingStream = null;
+        }
+
+        private void CleanupRecording()
+        {
+            Recording = false;
+
+            var oldWaveIn = waveIn;
+            waveIn = null;
+
+            if (oldWaveIn != null)
+            {
+                oldWaveIn.DataAvailable -= WaveIn_DataAvailable;
+                oldWaveIn.RecordingStopped -= WaveIn_RecordingStopped;
+
+                try { oldWaveIn.Dispose(); } catch { }
+            }
+
+            var oldWriter = writer;
+            writer = null;
+
+            if (oldWriter != null)
+            {
+                try { oldWriter.Dispose(); } catch { }
+            }
         }
 
         private void WaveIn_RecordingStopped(object sender, StoppedEventArgs e)
         {
-            if (waveIn != null)
+            try
             {
-                waveIn.Dispose();
-                waveIn = null;
+                CleanupRecording();
+
+                // The writer is disposed now, so the stream holds a complete WAV.
+                if (e.Exception == null && recordingStream != null) AudioWav = recordingStream.ToArray();
+
+                DiscardRecordingStream();
+
+                if (e.Exception != null)
+                {
+                    Errors.Add(new Exception($"Recording stopped unexpectedly: {e.Exception.Message}"), Plugin.DisplayName);
+                }
+                else if (playOnRecordingStopped)
+                {
+                    playOnRecordingStopped = false;
+
+                    ListenStart();
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not finish recording: {ex.Message}"), Plugin.DisplayName);
             }
 
-            if (writer != null)
-            {
-                writer.Dispose();
-                writer = null;
-            }
+            StatusChanged?.Invoke(this, null);
         }
 
         private void WaveIn_DataAvailable(object sender, WaveInEventArgs e)
         {
-            if (writer == null) return;
+            // Raised on NAudio's recording thread; an unhandled exception here
+            // would terminate the process, and the writer can be disposed by
+            // the UI thread between the null check and the write.
+            try
+            {
+                var currentWriter = writer;
 
-            writer.Write(e.Buffer, 0, e.BytesRecorded);
+                if (currentWriter == null || !ReferenceEquals(sender, waveIn)) return;
 
-            writer.Flush();
+                currentWriter.Write(e.Buffer, 0, e.BytesRecorded);
+
+                currentWriter.Flush();
+            }
+            catch { }
         }
 
         public void StopRecording()
         {
-            if (writer == null) return;
+            var currentWaveIn = waveIn;
 
-            waveIn.StopRecording();
+            if (currentWaveIn == null) return;
 
             Recording = false;
 
-            ListenStart();
+            playOnRecordingStopped = true;
+
+            try
+            {
+                currentWaveIn.StopRecording();
+            }
+            catch (Exception ex)
+            {
+                CleanupRecording();
+
+                Errors.Add(new Exception($"Could not stop recording: {ex.Message}"), Plugin.DisplayName);
+            }
         }
 
-        private void GenerateAutoFile()
+        private void GenerateAutoAudio()
         {
             try
             {
-                FileName = $"{ICAO}_{ID}_{DateTime.UtcNow:HHmmss}.wav";
+                using (var ms = new MemoryStream())
+                {
+                    using (var wavWriter = new WaveFileWriter(new IgnoreDisposeStream(ms), WaveForm))
+                    {
+                        ATISStream.Seek(0, SeekOrigin.Begin);
+                        ATISStream.CopyTo(wavWriter);
+                    }
 
-                var directory = Path.Combine(Plugin.DatasetPath, "Temp");
-
-                var file = Path.Combine(directory, FileName);
-
-                if (!Directory.Exists(directory)) Directory.CreateDirectory(directory);
-
-                SpeechSynth.SetOutputToWaveFile(file, SpeechFormat);
-                SpeechSynth.Speak(ATISSpoken);
-                SpeechSynth.SetOutputToNull();
+                    AudioWav = ms.ToArray();
+                }
 
                 ListenStart();
             }

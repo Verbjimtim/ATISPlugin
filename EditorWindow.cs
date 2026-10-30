@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using vatsys;
 using VATSYSControls;
+using static vatsys.Airspace2;
 
 namespace ATISPlugin
 {
@@ -24,7 +25,7 @@ namespace ATISPlugin
         }
         private string ICAO { get; set; }
         private char ID { get; set; }
-        private string DiplayName => Airport == null ? ICAO : $"{ICAO} - {Airport.FullName}";
+        private string DisplayName => Airport == null ? ICAO : $"{ICAO} - {Airport.FullName}";
         private Airspace2.Airport Airport => Airspace2.GetAirport(ICAO);
         public int Number { get; private set; } = 1;
         private Dictionary<string, string> Saves { get; set; } = new Dictionary<string, string>();
@@ -512,17 +513,17 @@ namespace ATISPlugin
 
             ComboBoxAirport.Items.Add("");
 
-            foreach (var freq in Plugin.ATISData.Frequencies.OrderBy(x => x.Airport))
+            foreach (var frequency in Plugin.ATISData.Frequencies.OrderBy(x => x.Airport))
             {
-                var airport = Airspace2.GetAirport(freq.Airport);
+                var airport = Airspace2.GetAirport(frequency.Airport);
 
                 if (airport == null)
                 {
-                    ComboBoxAirport.Items.Add(freq.Airport);
+                    ComboBoxAirport.Items.Add(frequency.Airport);
                 }
                 else
                 {
-                    ComboBoxAirport.Items.Add($"{freq.Airport} - {airport.FullName}");
+                    ComboBoxAirport.Items.Add($"{frequency.Airport} - {airport.FullName}");
                 }
             }
 
@@ -603,7 +604,14 @@ namespace ATISPlugin
 
                 if (!Initialized) return;
 
-                if (Plugin.ProfileName() == "New Zealand")
+                if (Plugin.SingleATISOnly && Number != 1)
+                {
+                    Change(1);
+
+                    return;
+                }
+
+                if (Profile.Name.Contains("VATNZ"))
                 {
                     ButtonZulu.Visible = false;
                 }
@@ -618,9 +626,9 @@ namespace ATISPlugin
                 }
                 else
                 {
-                    var index = ComboBoxAirport.Items.IndexOf(DiplayName);
+                    var index = ComboBoxAirport.Items.IndexOf(DisplayName);
 
-                    if (ComboBoxAirport.SelectedIndex != index) ComboBoxAirport.SelectedIndex = ComboBoxAirport.Items.IndexOf(DiplayName);
+                    if (ComboBoxAirport.SelectedIndex != index) ComboBoxAirport.SelectedIndex = ComboBoxAirport.Items.IndexOf(DisplayName);
                 }
 
                 ComboBoxLetter.SelectedIndex = ComboBoxLetter.Items.IndexOf(ID.ToString());
@@ -990,6 +998,12 @@ namespace ATISPlugin
 
         private void RefreshForm_TopButtons()
         {
+            var multipleAllowed = !Plugin.SingleATISOnly;
+
+            ButtonATIS2.Enabled = multipleAllowed;
+            ButtonATIS3.Enabled = multipleAllowed;
+            ButtonATIS4.Enabled = multipleAllowed;
+
             if (Plugin.ATIS1.ICAO != null)
             {
                 ButtonATIS1.Text = Plugin.ATIS1.ICAO;
@@ -1360,7 +1374,7 @@ namespace ATISPlugin
 
             LabelMETAR.Text = Control.METARRaw;
 
-            if (!Control.IsZulu && Control.HasUpdates && ID != Control.ID)
+            if (Control.HasUpdates && ID != Control.ID)
             {
                 LabelATIS.ForeColor = Colours.GetColour(Colours.Identities.Warning);
             }
@@ -1523,6 +1537,15 @@ namespace ATISPlugin
                         break;
                     case 13:
                         if (saveLine.Key != null) SetText(TextBoxZulu, saveLine.Value);
+                        else if (suggestedLine != null)
+                        {
+                            SetText(TextBoxZulu, suggestedLine.Value);
+                            TextBoxZulu.ForeColor = Colours.GetColour(Colours.Identities.Warning);
+                        }
+                        else
+                        {
+                            TextBoxZulu.ForeColor = Colours.GetColour(Colours.Identities.InteractiveText);
+                        }
                         break;
                     default:
                         break;
@@ -2149,13 +2172,13 @@ namespace ATISPlugin
 
             if (comboBox.SelectedIndex == -1) return;
 
-            var timecheckOK = bool.TryParse(comboBox.Items[comboBox.SelectedIndex], out bool timecheck);
+            var timeCheckOK = bool.TryParse(comboBox.Items[comboBox.SelectedIndex], out bool timeCheck);
 
-            if (!timecheckOK) return;
+            if (!timeCheckOK) return;
 
-            if (TimeCheck == timecheck) return;
+            if (TimeCheck == timeCheck) return;
 
-            TimeCheck = timecheck;
+            TimeCheck = timeCheck;
 
             ButtonSave.Enabled = true;
             ButtonCancel.Enabled = true;
@@ -2200,11 +2223,13 @@ namespace ATISPlugin
 
         private void GenerateZulu()
         {
-            var zuluInfo = Plugin.ZuluInfo.FirstOrDefault(x => x.ICAO == ICAO);
-
             var zuluLine = Control.Lines.FirstOrDefault(x => x.Name == "ZULU");
 
-            if (zuluInfo == null || zuluLine == null) return;
+            if (zuluLine == null) return;
+
+            var zuluInfo = Zulu.GetInfo(ICAO);
+
+            if (zuluInfo == null) return;
 
             var atis = zuluInfo.Text;
 
@@ -2231,6 +2256,8 @@ namespace ATISPlugin
             if (string.IsNullOrWhiteSpace(baseWind)) return string.Empty;
 
             if (baseWind == "CALM") return "CALM";
+
+            if (baseWind == "LIGHT AND VRB") return "VARIABLE";
 
             if (baseWind.StartsWith("VRB")) return "VARIABLE";
 

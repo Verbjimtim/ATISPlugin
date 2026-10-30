@@ -717,7 +717,7 @@ namespace ATISPlugin
             this.Name = "EditorWindow";
             this.Resizeable = false;
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.Text = $"ATIS Editor - v{Plugin.Version.Major}.{Plugin.Version.Minor}";
+            this.Text = $"ATIS Editor";
             this.TitleTextColor = System.Drawing.SystemColors.ActiveCaptionText;
             this.Load += new System.EventHandler(this.EditorWindow_Load);
             this.ResumeLayout(false);

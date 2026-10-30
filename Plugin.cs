@@ -1,11 +1,14 @@
 ﻿using Newtonsoft.Json;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.IO;
 using System.Linq;
 using System.Media;
 using System.Net.Http;
+using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Timers;
 using System.Windows.Forms;
@@ -22,9 +25,9 @@ namespace ATISPlugin
         public string Name => "ATIS Editor";
         public static string DisplayName => "ATIS Editor";
 
-        public static readonly Version Version = new Version(4, 0);
         private static readonly string RepositoryUrl = "https://raw.githubusercontent.com/badvectors/ATISPlugin/master";
-        private static readonly string VersionUrl = $"{RepositoryUrl}/Version.json";
+        private static readonly string PresetsUrl = $"{RepositoryUrl}/Presets.json";
+        private static readonly string OFCWUrl = $"{RepositoryUrl}/OFCW.json";
 
         // Config files live in the profile's Plugins\Configs folder. The repository copies are only a fallback
         // for profiles that don't have them yet.
@@ -43,35 +46,73 @@ namespace ATISPlugin
 
         private static EditorWindow Editor;
 
-        public static string ProfileName()
-        {
-            if (Profile.Name.Contains("Australia")) return "Australia";
-            else if (Profile.Name.Contains("Pacific")) return "Pacific";
-            else if (Profile.Name.Contains("VATNZ")) return "New Zealand";
-            else return string.Empty;
-        }
         public static readonly string ManualVoiceName = "Manual Recording";
-        public static string DatasetPath => Path.Combine(Helpers.GetFilesFolder(), "Profiles", ProfileName());
-        public static string ConfigsPath => Path.Combine(DatasetPath, "Plugins", "Configs");
+        public static string DatasetPath => VatSysDatasetPath;
+        public static string ConfigsPath => DatasetPath == null ? null : Path.Combine(DatasetPath, "Plugins", "Configs");
+
+        private static string vatSysDatasetPath;
+        private static bool vatSysDatasetPathChecked;
+
+        private static string VatSysDatasetPath
+        {
+            get
+            {
+                if (vatSysDatasetPathChecked) return vatSysDatasetPath;
+
+                vatSysDatasetPathChecked = true;
+
+                try
+                {
+                    var settingsType = typeof(vatsys.ATIS).Assembly.GetType("vatsys.Properties.Settings");
+                    var settings = settingsType?.GetProperty("Default")?.GetValue(null);
+                    var path = settings == null ? null : settingsType.GetProperty("DatasetPath")?.GetValue(settings) as string;
+
+                    if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path)) vatSysDatasetPath = path;
+                }
+                catch { }
+
+                return vatSysDatasetPath;
+            }
+        }
+        // Tower and below may only operate a single ATIS.
+        public static bool SingleATISOnly
+        {
+            get
+            {
+                if (!Network.IsConnected) return false;
+
+                var callsign = Network.Callsign;
+
+                if (string.IsNullOrWhiteSpace(callsign)) return false;
+
+                return callsign.EndsWith("_DEL") || callsign.EndsWith("_GND") || callsign.EndsWith("_TWR");
+            }
+        }
+
         public static ATIS ATISData { get; set; }
         public static ATISPresets Presets { get; set; } = new ATISPresets();
         public static List<ZuluInfo> ZuluInfo { get; set; } = new List<ZuluInfo>();
+        public static List<OFCWInfo> OFCWInfo { get; set; } = new List<OFCWInfo>();
         public static List<CodeBlock> CodeBlocks { get; set; } = new List<CodeBlock>();
+        public static List<PresetOption> PresetOptions { get; set; } = new List<PresetOption>();
 
         public static SoundPlayer SoundPlayer { get; set; } = new SoundPlayer();
         private static Timer BroadcastTimer { get; set; } = new Timer();
         private static Timer TimedUpdatesTimer { get; set; } = new Timer();
-        public static List<ATISAudio> ToBroadcast { get; set; } = new List<ATISAudio>();
+        public static ConcurrentQueue<ATISAudio> ToBroadcast { get; } = new ConcurrentQueue<ATISAudio>();
+
+        // vatSys encodes bot audio with a single shared Opus encoder that is not
+        // thread safe, so only one upload may run at a time. Overlapping uploads
+        // corrupt the encoder until vatSys is restarted.
+        private static readonly SemaphoreSlim BroadcastLock = new SemaphoreSlim(1, 1);
 
         public static List<VSCSFrequency> Frequencies { get; set; } = new List<VSCSFrequency>();
 
         public Plugin()
         {
-            if (!Profile.Name.Contains("Australia") && !Profile.Name.Contains("Pacific") && !Profile.Name.Contains("VATNZ"))
-            {
-                return;
-            }
-            
+            // Stay inactive on profiles without an ATIS.xml in their dataset.
+            if (!File.Exists(Path.Combine(DatasetPath, "ATIS.xml"))) return;
+
             vatsys.ATIS.Disable();
 
             try
@@ -87,35 +128,12 @@ namespace ATISPlugin
                 ATISMenu.Item.Click += ATISMenu_Click;
                 MMI.AddCustomMenuItem(ATISMenu);
 
-                if (!Directory.Exists(DatasetPath))
-                {
-                    Errors.Add(new Exception("Could not find profile."), DisplayName);
-                    return;
-                }
-
                 GetData();
 
                 if (ATISData == null)
                 {
                     Errors.Add(new Exception("Could not load ATIS data."), DisplayName);
                     return;
-                }
-
-                var directory = Path.Combine(DatasetPath, "Temp");
-
-                if (!Directory.Exists(directory))
-                {
-                    Directory.CreateDirectory(directory);
-                }
-
-                var toDelete = Directory
-                    .EnumerateFiles(directory, "*.*", SearchOption.TopDirectoryOnly)
-                    .Where(s => Path.GetExtension(s).TrimStart('.').ToLowerInvariant() == "wav");
-
-                foreach (var file in toDelete)
-                {
-                    if (file.Contains("AIS.wav")) continue;
-                    File.Delete(file);
                 }
 
                 ATIS1 = new ATISControl(1);
@@ -149,11 +167,13 @@ namespace ATISPlugin
 
             _ = GetZuluInfo();
 
+            _ = GetOFCWInfo();
+
             _ = GetCodeBlocks();
 
-            _ = GetPresets();
+            _ = GetPresetOptions();
 
-            _ = CheckVersion();
+            _ = GetPresets();
         }
 
         private static IEnumerable<ATISControl> AllATIS => new[] { ATIS1, ATIS2, ATIS3, ATIS4 }.Where(x => x != null);
@@ -199,35 +219,20 @@ namespace ATISPlugin
 
         private ATISControl GetATIS(string icao) => AllATIS.FirstOrDefault(x => x.ICAO == icao);
 
-        private static async Task CheckVersion()
-        {
-            try
-            {
-                var response = await Client.GetStringAsync(VersionUrl);
-
-                var version = JsonConvert.DeserializeObject<Version>(response);
-
-                if (version.Major == Version.Major && version.Minor == Version.Minor) return;
-
-                Errors.Add(new Exception("A new version of the plugin is available."), DisplayName);
-            }
-            catch { }
-        }
-
         // Reads a config file from the profile. If the profile doesn't have it, it's downloaded from the
         // repository and saved there. A file already in the profile is always used as is.
         private static async Task<string> GetConfigFile(string fileName)
         {
-            var path = Path.Combine(ConfigsPath, fileName);
+            var path = ConfigsPath == null ? null : Path.Combine(ConfigsPath, fileName);
 
-            if (File.Exists(path)) return File.ReadAllText(path);
+            if (path != null && File.Exists(path)) return File.ReadAllText(path);
 
             var content = await Client.GetStringAsync($"{RepositoryUrl}/{fileName}");
 
             try
             {
                 // Only save into a profile that exists, rather than creating one.
-                if (Directory.Exists(DatasetPath))
+                if (path != null && Directory.Exists(DatasetPath))
                 {
                     Directory.CreateDirectory(ConfigsPath);
 
@@ -280,6 +285,25 @@ namespace ATISPlugin
             }
         }
 
+        private static async Task GetPresetOptions()
+        {
+            try
+            {
+                var response = await Client.GetStringAsync(PresetsUrl);
+
+                var presetOptions = JsonConvert.DeserializeObject<PresetOption[]>(response);
+
+                foreach (var presetOption in presetOptions)
+                {
+                    PresetOptions.Add(presetOption);
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception(ex.Message), DisplayName);
+            }
+        }
+
         private static async Task GetZuluInfo()
         {
             try
@@ -299,31 +323,64 @@ namespace ATISPlugin
             }
         }
 
-        // An exception escaping an async void handler would take vatSys down, so each one catches everything.
+        private static async Task GetOFCWInfo()
+        {
+            try
+            {
+                var response = await Client.GetStringAsync(OFCWUrl);
+
+                var ofcwInfo = JsonConvert.DeserializeObject<OFCWInfo[]>(response);
+
+                foreach (var info in ofcwInfo)
+                {
+                    OFCWInfo.Add(info);
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception(ex.Message), DisplayName);
+            }
+        }
+
+        // Dispatch queued audio without waiting for the next poll, so the
+        // broadcast starts close to the time the timecheck was spoken for.
+        public static void BroadcastNow()
+        {
+            BroadcastTimer.Stop();
+            BroadcastTimer.Interval = 250;
+            BroadcastTimer.Start();
+        }
+
+        // An exception escaping an async void handler would take vatSys down, so it catches everything.
         private async void BroadcastTimer_Elasped(object sender, ElapsedEventArgs e)
         {
             try
             {
-                var toBroadcast = ToBroadcast.ToList();
+                // BroadcastNow can fire this handler while an earlier one is still
+                // uploading, so wait for it to finish rather than running alongside it.
+                await BroadcastLock.WaitAsync();
 
-                foreach (var atb in toBroadcast)
+                try
                 {
-                    var atis = ToBroadcast.FirstOrDefault(x => x.Id == atb.Id);
-
-                    if (atis != null) ToBroadcast.Remove(atis);
-
-                    if (!Network.IsOfficialServer) continue;
-
-                    if (!Network.GetATISConnected(atb.ATISIndex)) continue;
-
-                    try
+                    while (ToBroadcast.TryDequeue(out var atb))
                     {
-                        await AFV.AddOrUpdateATISBot(atb.Audio, atb.ATISIndex, atb.Callsign, atb.Frequency, atb.VisPoint, atb.Duration);
+                        if (!Network.IsOfficialServer) continue;
+
+                        if (!Network.GetATISConnected(atb.ATISIndex)) continue;
+
+                        try
+                        {
+                            await StartVoiceATIS(atb);
+                        }
+                        catch (Exception ex)
+                        {
+                            Errors.Add(new Exception($"Could not start voice ATIS: {ex.Message}"), DisplayName);
+                        }
                     }
-                    catch (Exception ex)
-                    {
-                        Errors.Add(new Exception($"Could not start voice ATIS: {ex.Message}"), DisplayName);
-                    }
+                }
+                finally
+                {
+                    BroadcastLock.Release();
                 }
             }
             catch (Exception ex)
@@ -332,7 +389,13 @@ namespace ATISPlugin
             }
             finally
             {
-                if (!Disposed) BroadcastTimer.Start();
+                if (!Disposed)
+                {
+                    // Audio queued while this handler was finishing must not wait for the slow poll.
+                    BroadcastTimer.Interval = ToBroadcast.IsEmpty ? TimeSpan.FromSeconds(5).TotalMilliseconds : 250;
+
+                    BroadcastTimer.Start();
+                }
             }
         }
 
@@ -384,6 +447,57 @@ namespace ATISPlugin
             }
         }
 
+        private static async Task StartVoiceATIS(ATISAudio atb)
+        {
+            try
+            {
+                await AFV.AddOrUpdateATISBot(atb.Audio, atb.ATISIndex, atb.Callsign, atb.Frequency, atb.VisPoint, atb.Duration);
+            }
+            catch (Exception ex) when (IsEncoderFault(ex) && ResetEncoder())
+            {
+                // A corrupted encoder fails every upload until vatSys is restarted,
+                // so try again on the replacement.
+                await AFV.AddOrUpdateATISBot(atb.Audio, atb.ATISIndex, atb.Callsign, atb.Frequency, atb.VisPoint, atb.Duration);
+            }
+        }
+
+        // Network and validation errors are thrown elsewhere in vatSys, only a
+        // corrupted encoder throws from inside the encoding itself.
+        private static bool IsEncoderFault(Exception ex)
+        {
+            return !(ex is TimeoutException) && ex.StackTrace != null && ex.StackTrace.Contains("BotHelper2");
+        }
+
+        // Swap the shared Opus encoder in vatSys for a new one. Must only be
+        // called while holding the BroadcastLock.
+        private static bool ResetEncoder()
+        {
+            try
+            {
+                var helper = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(x => x.GetName().Name == "GeoVR.Connection.BotHelper2")?
+                    .GetType("GeoVR.Connection.BotHelper2");
+
+                var field = helper?.GetField("opusEncoder", BindingFlags.NonPublic | BindingFlags.Static);
+
+                if (field == null || field.IsInitOnly) return false;
+
+                var constructor = field.FieldType.GetConstructors().FirstOrDefault(x => x.GetParameters().Length == 3);
+
+                if (constructor == null) return false;
+
+                var application = Enum.Parse(constructor.GetParameters()[2].ParameterType, "OPUS_APPLICATION_VOIP");
+
+                field.SetValue(null, constructor.Invoke(new object[] { 48000, 1, application }));
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private void Audio_VSCSFrequenciesChanged(object sender, EventArgs e)
         {
             Frequencies.Clear();
@@ -415,7 +529,7 @@ namespace ATISPlugin
         // Each ATIS is deleted on its own, so one failing doesn't leave the others connected.
         private static async Task DeleteAll()
         {
-            ToBroadcast.Clear();
+            while (ToBroadcast.TryDequeue(out _)) { }
 
             foreach (var atis in AllATIS.ToList())
             {
@@ -523,7 +637,13 @@ namespace ATISPlugin
 
             try
             {
-                MMI.InvokeOnGUI(delegate () { Editor.Show(mainForm); });
+                MMI.InvokeOnGUI(delegate ()
+                {
+                    Editor.Show(mainForm);
+
+                    // Connection state may have changed while the window was closed.
+                    Editor.RefreshEvent?.Invoke(null, null);
+                });
             }
             catch { }
         }
