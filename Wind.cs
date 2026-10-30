@@ -96,6 +96,14 @@ namespace ATISPlugin
             }
         }
 
+        // Whether any direction in the wind's range is within from to to (clockwise, inclusive).
+        public bool Overlaps(int from, int to)
+        {
+            var span = (to - from + 360) % 360;
+
+            return Directions().Any(x => (x - from + 360) % 360 <= span);
+        }
+
         // Worst case over the whole direction range, crosswind and tailwind at gust strength,
         // headwind at mean strength. Crosswind is positive from the right, negative from the left.
         public WindComponents Worst(double runwayHeading)

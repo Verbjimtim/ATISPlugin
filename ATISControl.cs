@@ -223,6 +223,9 @@ namespace ATISPlugin
             PrecipitationLastSeenUtc = null;
             ModeAutoSelected = false;
             TimedSuggestionsMade.Clear();
+            RunwayChangeAlerted = null;
+            SuggestedMode = null;
+            TimedModesInPeriod = null;
             FrequencyDisplay = null;
             Frequency = 0;
             AliasFrequency = 0;
@@ -281,6 +284,8 @@ namespace ATISPlugin
             UpdateSurfaceConditionTracking(surfaceLine, wasDry);
 
             SuggestedLines.Clear();
+
+            SuggestedMode = null;
 
             TimedSuggestionsMade.Clear();
 
@@ -426,17 +431,26 @@ namespace ATISPlugin
             if (SuggestedLines.Any(x => x.METARField != METARField.None)) METARRaw = METARLastRaw;
 
             SuggestedLines.Clear();
+
+            SuggestedMode = null;
         }
+
+        // Set by Load METAR, so the next METAR is applied even if it's the one already loaded.
+        public bool ForceMetarUpdate { get; set; }
 
         public bool UpdateMetar(string metar)
         {
             if (ICAO == null) return false;
 
-            if (metar == METARRaw) return false;
+            var force = ForceMetarUpdate;
+
+            ForceMetarUpdate = false;
+
+            if (metar == METARRaw && !force) return false;
 
             if (IsZulu && !string.IsNullOrWhiteSpace(METARRaw)) return false;
-            
-            METARLastRaw = METARRaw;
+
+            if (metar != METARRaw) METARLastRaw = METARRaw;
 
             METARRaw = metar;
 
@@ -547,6 +561,7 @@ namespace ATISPlugin
 
         // Suggests time based changes: SFC COND to DRY once the condition has had time to clear, and removing
         // windshear reported over an hour ago from SIGWX. Each is suggested once until the next save.
+        // Also true (to open the editor) when an OPR INFO runway change FM time is reached.
         public bool CheckTimedUpdates(DateTime utcNow)
         {
             if (ICAO == null || IsZulu) return false;
@@ -571,8 +586,89 @@ namespace ATISPlugin
 
             if (windshear != null) added |= SuggestTimed(windshearLine, windshear);
 
+            // Alerts once when an OPR INFO FM time is reached, and again only for a different time.
+            var runwayChangeLine = Lines.FirstOrDefault(x => x.Name == RunwayChange.Field);
+
+            var reached = RunwayChange.Reached(runwayChangeLine?.Value, utcNow);
+
+            if (reached != null && reached != RunwayChangeAlerted) added = true;
+
+            RunwayChangeAlerted = reached;
+
+            added |= CheckTimedModes(utcNow);
+
             return added;
         }
+
+        // The runway mode suggested by CheckTimedModes, with its fields in SuggestedLines, until saved or cancelled.
+        public string SuggestedMode { get; set; }
+
+        // The timed modes (curfew, RRO) within their hours at the last check, to spot hours starting and ending.
+        private string TimedModesInPeriod { get; set; }
+
+        // When a timed mode's hours start or end, suggests the best mode for the time and weather, if that's a
+        // change to or from a timed mode (e.g. into curfew at 2300, and back out at 0600).
+        private bool CheckTimedModes(DateTime utcNow)
+        {
+            var presetAirport = Plugin.Presets?.GetAirport(ICAO);
+
+            if (presetAirport == null) return false;
+
+            var modes = presetAirport.GetModes(EditorWindow.RunwayNames(Airspace2.GetAirport(ICAO)));
+
+            var timeZone = presetAirport.GetTimeZone();
+
+            var inPeriod = string.Join(",", modes.Where(x => x.InPeriod(utcNow, timeZone)).Select(x => x.Name));
+
+            var previous = TimedModesInPeriod;
+
+            TimedModesInPeriod = inPeriod;
+
+            // The first check only records the hours; the mode picked on creation already allows for them.
+            if (previous == null || previous == inPeriod) return false;
+
+            var surfaceLine = Lines.FirstOrDefault(x => x.Name == SurfaceCondition.Field);
+
+            var conditions = RunwaySelection.FromMetar(METARRaw, SurfaceCondition.Rank(surfaceLine?.Value) > 0);
+
+            conditions.UtcNow = utcNow;
+            conditions.TimeZone = timeZone;
+
+            var best = RunwaySelection.Best(modes, conditions, runway => EditorWindow.RunwayHeading(ICAO, runway));
+
+            if (best == null || best.Name == Mode) return false;
+
+            var current = modes.FirstOrDefault(x => x.Name == Mode);
+
+            var toTimed = best.InPeriod(utcNow, timeZone);
+            var fromTimed = current != null && current.IsTimed && !current.InPeriod(utcNow, timeZone);
+
+            if (!toTimed && !fromTimed) return false;
+
+            foreach (var field in best.Fields)
+            {
+                var line = Lines.FirstOrDefault(x => x.Name == field.Name);
+
+                if (line == null) continue;
+
+                SuggestedLines.RemoveAll(x => x.Name == line.Name);
+
+                var value = PresetAirport.Clean(field.Value);
+
+                if ((line.Value ?? string.Empty) == value) continue;
+
+                SuggestedLines.Add(new ATISLine(line.Name, 0, line.Type, line.NameSpoken, line.NumbersGrouped, value, line.METARField));
+            }
+
+            SuggestedMode = best.Name;
+
+            SuggestionsVersion++;
+
+            return true;
+        }
+
+        // The OPR INFO FM time last alerted, while it's still the reached one.
+        private string RunwayChangeAlerted { get; set; }
 
         private bool SuggestTimed(ATISLine line, string value)
         {

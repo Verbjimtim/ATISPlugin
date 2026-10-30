@@ -24,11 +24,16 @@ namespace ATISPlugin
             public int Ceiling { get; set; } = Unlimited;
             public int Visibility { get; set; } = Unlimited;
             public bool Wet { get; set; }
+            // For modes with local hours (curfew, RRO). Without a time zone they're never within them.
+            public DateTime UtcNow { get; set; } = DateTime.UtcNow;
+            public TimeZoneInfo TimeZone { get; set; }
         }
 
         public class Assessment
         {
             public PresetMode Mode { get; set; }
+            public bool Automatic { get; set; }
+            public bool InPeriod { get; set; }
             public bool Usable { get; set; }
             public bool WeatherOk { get; set; }
             // Knots over the crosswind and tailwind limits, combined.
@@ -97,11 +102,14 @@ namespace ATISPlugin
                 && conditions.Visibility >= mode.MinVisibility
                 && !(mode.DryOnly && conditions.Wet);
 
+            var automatic = mode.IsAutomatic(conditions.UtcNow, conditions.TimeZone);
+            var inPeriod = mode.InPeriod(conditions.UtcNow, conditions.TimeZone);
+
             Assessment best = null;
 
             foreach (var group in RunwayGroups(mode))
             {
-                var assessment = new Assessment { Mode = mode, WeatherOk = weatherOk };
+                var assessment = new Assessment { Mode = mode, Automatic = automatic, InPeriod = inPeriod, WeatherOk = weatherOk };
 
                 if (conditions.Wind != null)
                 {
@@ -120,21 +128,22 @@ namespace ATISPlugin
             }
 
             // Without runways to check, the wind can't be judged, so it's never picked automatically.
-            return best ?? new Assessment { Mode = mode, Usable = false, WeatherOk = weatherOk, Excess = Unlimited, Tailwind = Unlimited, Crosswind = Unlimited, AverageCrosswind = Unlimited };
+            return best ?? new Assessment { Mode = mode, Automatic = automatic, InPeriod = inPeriod, Usable = false, WeatherOk = weatherOk, Excess = Unlimited, Tailwind = Unlimited, Crosswind = Unlimited, AverageCrosswind = Unlimited };
         }
 
-        // Best first: automatic modes, usable, SOP priority, least tailwind, then least crosswind. Ties keep the
-        // ATISPresets.xml order, so list approach variants best first (IVA before instrument); a variant whose
-        // weather minima aren't met is unusable and drops down.
+        // Best first: automatic modes, usable, modes within their hours (curfew, RRO), SOP priority, least
+        // tailwind, then least crosswind. Ties keep the ATISPresets.xml order, so list approach variants best
+        // first (IVA before instrument); a variant whose weather minima aren't met is unusable and drops down.
         private static int Compare(Assessment a, Assessment b)
         {
             var keys = new Func<Assessment, double>[]
             {
-                x => x.Mode.AutoSelect ? 0 : 1,
+                x => x.Automatic ? 0 : 1,
                 x => x.Usable ? 0 : 1,
                 // When nothing is within limits: weather minima met first, then the least over the wind limits.
                 x => x.Usable || x.WeatherOk ? 0 : 1,
                 x => x.Usable ? 0 : x.Excess,
+                x => x.InPeriod ? 0 : 1,
                 x => x.Mode.Priority > 0 ? x.Mode.Priority : x.Mode.Generated ? Generated : Unranked,
                 x => x.Tailwind,
                 x => x.Crosswind,
@@ -161,6 +170,6 @@ namespace ATISPlugin
 
         // The best mode to start with. When no mode is within the SOP limits (e.g. a storm), the least bad one.
         public static PresetMode Best(IEnumerable<PresetMode> modes, Conditions conditions, Func<string, double> heading) =>
-            Rank(modes, conditions, heading).FirstOrDefault(x => x.Mode.AutoSelect)?.Mode;
+            Rank(modes, conditions, heading).FirstOrDefault(x => x.Automatic)?.Mode;
     }
 }

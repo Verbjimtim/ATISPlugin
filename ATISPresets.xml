@@ -10,9 +10,16 @@
     MinCeiling, MinVisibility  lowest BKN/OVC cloud base (ft) and visibility (m) the mode needs.
                             METAR steps mean "above 3000FT" is 3100 and "above 5000M" is 6000.
     DryOnly="true"          not used on a wet runway (SFC COND set, or precipitation in the METAR).
-    AutoSelect="false"      never picked automatically (curfew, RRO).
+    AutoSelect="false"      never picked automatically.
+    Hours="2300-0600"       local hours the mode is for (curfew, RRO), using TimeZone on <Airport>. Within them
+                            it's preferred over other modes; outside them it's never picked automatically.
+                            When the hours start or end, the best mode is suggested (popup, sound and MODE
+                            highlighted) if that changes to or from a timed mode, and saved or cancelled as usual.
+    DaylightSaving="true"   limits Hours to daylight saving time ("false": standard time), e.g. AEDT/AEST wording.
     Runways="10L,10R|28L,28R"  runways to check against the wind when the RWY text names both ends.
   A mode is usable with up to 20KT crosswind and 5KT tailwind (none when wet) on each of its runways.
+
+  TimeZone="AUS Eastern Standard Time" on <Airport> is the Windows time zone for Hours.
 
   <Presets>  Options shown on a field's arrow button. With a mode selected, only that mode's value and
              presets for that mode (Modes="A,B") or for all modes (no Modes attribute) are shown.
@@ -26,6 +33,11 @@
     [TIME+15]                          free text, starts 15 minutes from now (any number of minutes)
 
   <Default Name="DEPARTING VIA">...</Default> on <Airport> gives the starting value for a blank of that name.
+
+  <AutoAdd Field="SIGWX" Runways="34R" Modes="A,B" Wind="020-070" AboveSpeed="14">TEXT</AutoAdd> on <Airport>
+             adds TEXT to the field while every given condition is met, and removes it once one isn't:
+             Runways all in RWY, one of Modes selected, any of the WIND direction range within Wind (magnetic,
+             clockwise, inclusive) and the mean speed above AboveSpeed. Checked when WIND, RWY or MODE changes.
 
   ReportCrosswindFrom="5" on <Airport> adds MX XW to WIND from 5KT crosswind (default: above 10KT).
 
@@ -49,7 +61,7 @@
 
   <!-- ===================== Class C ===================== -->
 
-  <Airport ICAO="YSSY">
+  <Airport ICAO="YSSY" TimeZone="AUS Eastern Standard Time">
     <Mode Name="34 PROPS IVA" Priority="2" MinCeiling="3100" MinVisibility="6000">
       <Field Name="APCH">EXP INDEP VISUAL APCH, DO NOT PASS THRU ASSIGNED RWY CL</Field>
       <Field Name="RWY">34L AND R FOR ARRS AND DEPS</Field>
@@ -112,13 +124,14 @@
     <Mode Name="25D/34A" Priority="2">
       <Field Name="RWY">34L AND R FOR ARRS, RWY 25 FOR DEPS</Field>
     </Mode>
-    <!-- RWY wording below is not given in the SOP; it follows the SODPROPS format. -->
-    <Mode Name="CURFEW (AEST)" AutoSelect="false">
+    <!-- RWY wording below is not given in the SOP; it follows the SODPROPS format.
+         Curfew is permitted only between 2300 and 0600 local. -->
+    <Mode Name="CURFEW (AEST)" Hours="2300-0600" DaylightSaving="false">
       <Field Name="APCH" />
       <Field Name="RWY">34L FOR ARRS, RWY 16R FOR DEPS</Field>
       <Field Name="OPR INFO">CURFEW RWY NOMINATION. CURFEW IN OPERATION UNTIL TIME 2000</Field>
     </Mode>
-    <Mode Name="CURFEW (AEDT)" AutoSelect="false">
+    <Mode Name="CURFEW (AEDT)" Hours="2300-0600" DaylightSaving="true">
       <Field Name="APCH" />
       <Field Name="RWY">34L FOR ARRS, RWY 16R FOR DEPS</Field>
       <Field Name="OPR INFO">CURFEW RWY NOMINATION. CURFEW IN OPERATION UNTIL TIME 1900</Field>
@@ -138,6 +151,8 @@
       <Preset />
       <Preset>EXP INSTR APCH</Preset>
     </Presets>
+    <AutoAdd Field="SIGWX" Runways="34R" Wind="020-070" AboveSpeed="14">CAUTION POSSIBLE TURBULENCE ON FINAL RUNWAY 34R</AutoAdd>
+    <AutoAdd Field="OPR INFO" Modes="34 PROPS IVA,34 PROPS INSTR THEN IVA,34 PROPS INSTR" Wind="260-310" AboveSpeed="5">CAUTION POSSIBLE WAKE TURBULENCE</AutoAdd>
     <Presets Field="OPR INFO" Multiple="true">
       <Preset>WHEN READY FOR PUSH BACK OR TAXI CTC COORDINATOR 127.6</Preset>
       <Preset>START APPROVAL RQ. WHEN READY FOR PUSH BACK OR ENGINE START, CTC SYDNEY COORDINATOR ON FREQ 127.6, FOR START TIME</Preset>
@@ -184,7 +199,7 @@
     <Default Name="OTHER RWY">27</Default>
   </Airport>
 
-  <Airport ICAO="YBBN">
+  <Airport ICAO="YBBN" TimeZone="E. Australia Standard Time">
     <Mode Name="01 PROPS" Priority="2">
       <Field Name="APCH">EXP INST APCH</Field>
       <Field Name="RWY">01L AND R FOR ARRS AND DEPS</Field>
@@ -195,12 +210,13 @@
       <Field Name="RWY">19L AND R FOR ARRS AND DEPS</Field>
       <Field Name="OPR INFO">INDEPENDENT PARALLEL DEPARTURES IN PROG</Field>
     </Mode>
-    <Mode Name="SODPROPS" AutoSelect="false">
+    <!-- SODPROPS is preferred, and RRO permitted only, between 2200 and 0600 local. -->
+    <Mode Name="SODPROPS" Hours="2200-0600">
       <Field Name="APCH">EXP INST APCH</Field>
       <Field Name="RWY">19R FOR ARR. RWY 01R FOR DEP</Field>
       <Field Name="OPR INFO">SIMULTANEOUS OPPOSITE DIRECTION PARALLEL RUNWAY OPERATIONS IN PROG</Field>
     </Mode>
-    <Mode Name="RRO" AutoSelect="false">
+    <Mode Name="RRO" Hours="2200-0600">
       <Field Name="APCH">EXP INST APCH</Field>
       <Field Name="RWY">19L FOR ARR. RWY 01R FOR DEP</Field>
       <Field Name="OPR INFO" />
@@ -268,7 +284,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YSWS">
+  <Airport ICAO="YSWS" TimeZone="AUS Eastern Standard Time">
     <Mode Name="RWY 23" Priority="1">
       <Field Name="APCH">EXP INST APCH</Field>
       <Field Name="RWY">23</Field>
@@ -277,7 +293,8 @@
       <Field Name="APCH">EXP INST APCH</Field>
       <Field Name="RWY">05</Field>
     </Mode>
-    <Mode Name="RRO" AutoSelect="false">
+    <!-- Permitted between 2300 and 0530 local when YSSY curfew is in use: arrivals 05, departures 23. -->
+    <Mode Name="RRO" Hours="2300-0530" Runways="05,23">
       <Field Name="APCH">EXP INST APCH</Field>
       <Field Name="RWY">RECIPROCAL RWY OPS IN PROGRESS</Field>
     </Mode>

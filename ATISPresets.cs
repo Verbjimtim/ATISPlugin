@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Xml.Serialization;
 
 namespace ATISPlugin
@@ -25,9 +27,11 @@ namespace ATISPlugin
                 ICAO = icao,
                 SingleRunwayFormat = matches.Select(x => x.SingleRunwayFormat).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)),
                 ReportCrosswindFrom = matches.Select(x => x.ReportCrosswindFrom).Where(x => x != PresetAirport.DefaultReportCrosswindFrom).DefaultIfEmpty(PresetAirport.DefaultReportCrosswindFrom).First(),
+                TimeZone = matches.Select(x => x.TimeZone).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)),
                 Modes = matches.SelectMany(x => x.Modes).ToList(),
                 Fields = matches.SelectMany(x => x.Fields).ToList(),
-                Defaults = matches.SelectMany(x => x.Defaults).GroupBy(x => x.Name).Select(x => x.First()).ToList()
+                Defaults = matches.SelectMany(x => x.Defaults).GroupBy(x => x.Name).Select(x => x.First()).ToList(),
+                AutoAdds = matches.SelectMany(x => x.AutoAdds).ToList()
             };
         }
     }
@@ -50,6 +54,24 @@ namespace ATISPlugin
         [XmlAttribute]
         public string SingleRunwayFormat { get; set; }
 
+        // Windows time zone ID (e.g. "AUS Eastern Standard Time") for modes with local Hours.
+        [XmlAttribute]
+        public string TimeZone { get; set; }
+
+        public TimeZoneInfo GetTimeZone()
+        {
+            if (string.IsNullOrWhiteSpace(TimeZone)) return null;
+
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(TimeZone);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         [XmlElement("Mode")]
         public List<PresetMode> Modes { get; set; } = new List<PresetMode>();
 
@@ -59,6 +81,10 @@ namespace ATISPlugin
         // Starting values for template blanks at this airport, by blank name.
         [XmlElement("Default")]
         public List<PresetDefault> Defaults { get; set; } = new List<PresetDefault>();
+
+        // Text added to a field while its conditions are met, and removed once they aren't.
+        [XmlElement("AutoAdd")]
+        public List<PresetAutoAdd> AutoAdds { get; set; } = new List<PresetAutoAdd>();
 
         public List<PresetMode> GetModes(IEnumerable<string> runways)
         {
@@ -142,9 +168,45 @@ namespace ATISPlugin
         [XmlAttribute]
         public bool DryOnly { get; set; }
 
-        // False for modes that are never picked automatically (curfew, RRO).
+        // False for modes that are never picked automatically.
         [XmlAttribute]
         public bool AutoSelect { get; set; } = true;
+
+        // Local hours the mode is for, e.g. "2300-0600" (curfew, RRO). Within them it's preferred over modes
+        // without hours, and suggested as they start; outside them it's never picked automatically.
+        [XmlAttribute]
+        public string Hours { get; set; }
+
+        // "true" or "false" to limit the hours to daylight saving time or standard time (e.g. AEDT and AEST wording).
+        [XmlAttribute]
+        public string DaylightSaving { get; set; }
+
+        public bool IsTimed => !string.IsNullOrWhiteSpace(Hours);
+
+        private static readonly Regex HoursRegex = new Regex("^(\\d{2})(\\d{2})-(\\d{2})(\\d{2})$");
+
+        public bool InPeriod(DateTime utcNow, TimeZoneInfo timeZone)
+        {
+            if (!IsTimed || timeZone == null) return false;
+
+            var match = HoursRegex.Match(Hours.Trim());
+
+            if (!match.Success) return false;
+
+            var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc), timeZone);
+
+            if (bool.TryParse(DaylightSaving, out var daylightSaving) && timeZone.IsDaylightSavingTime(local) != daylightSaving) return false;
+
+            var now = local.Hour * 60 + local.Minute;
+            var start = int.Parse(match.Groups[1].Value) * 60 + int.Parse(match.Groups[2].Value);
+            var end = int.Parse(match.Groups[3].Value) * 60 + int.Parse(match.Groups[4].Value);
+
+            // Hours past midnight, e.g. 2300-0600.
+            return start <= end ? now >= start && now < end : now >= start || now < end;
+        }
+
+        // Whether the mode can be picked automatically now: timed modes only within their hours.
+        public bool IsAutomatic(DateTime utcNow, TimeZoneInfo timeZone) => IsTimed ? InPeriod(utcNow, timeZone) : AutoSelect;
 
         // Runways to assess against the wind, when the RWY text doesn't say the direction (e.g. "10L/28R").
         // Alternative directions are separated by "|", e.g. "10L,10R|28L,28R". Defaults to the runways in RWY.
@@ -157,6 +219,57 @@ namespace ATISPlugin
 
         [XmlElement("Field")]
         public List<PresetModeField> Fields { get; set; } = new List<PresetModeField>();
+    }
+
+    // e.g. <AutoAdd Field="SIGWX" Runways="34R" Wind="020-070" AboveSpeed="14">CAUTION ...</AutoAdd>
+    public class PresetAutoAdd
+    {
+        [XmlAttribute]
+        public string Field { get; set; }
+
+        // Comma separated modes, one of which must be selected. Empty means any.
+        [XmlAttribute]
+        public string Modes { get; set; }
+
+        // Comma separated runways that must all be in RWY. Empty means any.
+        [XmlAttribute]
+        public string Runways { get; set; }
+
+        // Magnetic wind directions, e.g. "020-070". Met when any of the wind's direction range is within them.
+        [XmlAttribute]
+        public string Wind { get; set; }
+
+        // Mean wind speed (kt) to be exceeded.
+        [XmlAttribute]
+        public int AboveSpeed { get; set; }
+
+        [XmlText]
+        public string Text { get; set; }
+
+        private static readonly Regex DirectionsRegex = new Regex("^(\\d{3})-(\\d{3})$");
+
+        private static List<string> List(string value) =>
+            (value ?? string.Empty).Split(',').Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
+
+        public bool Applies(string mode, ICollection<string> runwaysInUse, ATISPlugin.Wind wind)
+        {
+            var modes = List(Modes);
+
+            if (modes.Any() && !modes.Contains(mode)) return false;
+
+            if (!List(Runways).All(runwaysInUse.Contains)) return false;
+
+            if (!string.IsNullOrWhiteSpace(Wind) || AboveSpeed > 0)
+            {
+                if (wind == null || wind.Speed <= AboveSpeed) return false;
+
+                var directions = DirectionsRegex.Match((Wind ?? string.Empty).Trim());
+
+                if (directions.Success && !wind.Overlaps(int.Parse(directions.Groups[1].Value), int.Parse(directions.Groups[2].Value))) return false;
+            }
+
+            return true;
+        }
     }
 
     public class PresetDefault

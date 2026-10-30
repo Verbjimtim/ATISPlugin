@@ -22,7 +22,7 @@ namespace ATISPlugin
         public string Name => "ATIS Editor";
         public static string DisplayName => "ATIS Editor";
 
-        public static readonly Version Version = new Version(3, 19);
+        public static readonly Version Version = new Version(4, 0);
         private static readonly string RepositoryUrl = "https://raw.githubusercontent.com/badvectors/ATISPlugin/master";
         private static readonly string VersionUrl = $"{RepositoryUrl}/Version.json";
 
@@ -134,8 +134,8 @@ namespace ATISPlugin
                 BroadcastTimer.Start();
 
                 TimedUpdatesTimer.Elapsed += new ElapsedEventHandler(TimedUpdatesTimer_Elapsed);
-                TimedUpdatesTimer.Interval = TimeSpan.FromMinutes(1).TotalMilliseconds;
-                TimedUpdatesTimer.AutoReset = true;
+                TimedUpdatesTimer.Interval = UntilNextMinute();
+                TimedUpdatesTimer.AutoReset = false;
                 TimedUpdatesTimer.Start();
 
                 // Only once the ATIS exist to take the METARs.
@@ -336,8 +336,9 @@ namespace ATISPlugin
             }
         }
 
-        // SFC COND clearing and windshear expiry are time based, so check them every minute. The timer runs on a
-        // background thread, so the check is done on the GUI thread, which owns the editor and the suggestions.
+        // SFC COND clearing, windshear expiry and OPR INFO FM times are time based, so check them at the start of
+        // every minute (an FM time alerts as that minute begins). The timer runs on a background thread, so the
+        // check is done on the GUI thread, which owns the editor and the suggestions.
         private void TimedUpdatesTimer_Elapsed(object sender, ElapsedEventArgs e)
         {
             try
@@ -348,6 +349,24 @@ namespace ATISPlugin
             {
                 Errors.Add(new Exception($"Could not check ATIS timed updates: {ex.Message}"), DisplayName);
             }
+            finally
+            {
+                if (!Disposed)
+                {
+                    TimedUpdatesTimer.Interval = UntilNextMinute();
+                    TimedUpdatesTimer.Start();
+                }
+            }
+        }
+
+        // Just past the next minute, as a timer can fire a little early.
+        private static double UntilNextMinute()
+        {
+            var now = DateTime.UtcNow;
+
+            var next = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0, DateTimeKind.Utc).AddMinutes(1);
+
+            return (next - now).TotalMilliseconds + 250;
         }
 
         private void CheckTimedUpdates()

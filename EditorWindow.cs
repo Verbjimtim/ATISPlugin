@@ -198,11 +198,13 @@ namespace ATISPlugin
 
         private List<PresetMode> Modes { get; set; } = new List<PresetMode>();
 
-        private IEnumerable<string> GetRunwayNames()
-        {
-            if (Airport == null) return Enumerable.Empty<string>();
+        private IEnumerable<string> GetRunwayNames() => RunwayNames(Airport);
 
-            return Airport.Runways
+        public static IEnumerable<string> RunwayNames(Airspace2.Airport airport)
+        {
+            if (airport == null) return Enumerable.Empty<string>();
+
+            return airport.Runways
                 .Select(x => x.Name.ToString().PadLeft(2, '0'))
                 .Where(x => Regex.IsMatch(x, "^\\d{2}[LRC]?$"))
                 .Distinct()
@@ -274,6 +276,39 @@ namespace ATISPlugin
             if (SurfaceCondition.Rank(condition) <= SurfaceCondition.Rank(surfaceBox.Text)) return;
 
             surfaceBox.Text = condition;
+        }
+
+        // Adds or removes each of the airport's AutoAdd texts in its field (e.g. turbulence cautions in SIGWX) to
+        // match the wind, runways and mode being edited. Runs when those change, not when the field itself is edited.
+        private void UpdateAutoAdditions()
+        {
+            if (Control.IsZulu || PresetAirport == null || !PresetAirport.AutoAdds.Any()) return;
+
+            var windLine = Control.Lines.FirstOrDefault(x => x.METARField == METARField.Wind);
+            var runwayLine = Control.Lines.FirstOrDefault(x => x.Name == "RWY");
+
+            var windBox = windLine == null ? null : GetTextBox(windLine.Number);
+            var runwayBox = runwayLine == null ? null : GetTextBox(runwayLine.Number);
+
+            var wind = windBox == null ? null : Wind.Parse(windBox.Text);
+
+            var runways = runwayBox == null ? new List<string>() : Wind.RunwaysInUse(runwayBox.Text);
+
+            foreach (var autoAdd in PresetAirport.AutoAdds)
+            {
+                var line = Control.Lines.FirstOrDefault(x => x.Name == autoAdd.Field);
+
+                var textBox = line == null ? null : GetTextBox(line.Number);
+
+                var text = PresetAirport.Clean(autoAdd.Text);
+
+                if (textBox == null || text.Length == 0) continue;
+
+                if (autoAdd.Applies(Mode, runways, wind) != ContainsPreset(textBox.Text, text))
+                {
+                    textBox.Text = TogglePreset(textBox.Text, text);
+                }
+            }
         }
 
         // Shows the arrow button only on fields with presets for the selected mode, and greys it out
@@ -648,7 +683,11 @@ namespace ATISPlugin
 
             var wet = surfaceBox != null && SurfaceCondition.Rank(surfaceBox.Text) > 0;
 
-            return RunwaySelection.FromMetar(Control.METARRaw, wet);
+            var conditions = RunwaySelection.FromMetar(Control.METARRaw, wet);
+
+            conditions.TimeZone = PresetAirport?.GetTimeZone();
+
+            return conditions;
         }
 
         // The profile's GroundUnknown colour (orange), as the window colours have no orange.
@@ -718,11 +757,27 @@ namespace ATISPlugin
                 }
             }
 
-            SetOutsideLimits(runwayLine, runwayOutside);
-            SetOutsideLimits(approachLine, approachOutside);
+            SetHighlight(runwayLine, runwayOutside, OutsideLimitsColour);
+            SetHighlight(approachLine, approachOutside, OutsideLimitsColour);
         }
 
-        private void SetOutsideLimits(ATISLine line, bool outside)
+        // The profile's VSCS active frequency green.
+        private static System.Drawing.Color RunwayChangeColour => Colours.GetColour(Colours.Identities.VSCSActiveFrequency);
+
+        // Highlights OPR INFO green while its FM time has been reached, until it's removed or moved to the future.
+        private void RefreshForm_RunwayChange()
+        {
+            var line = Control.Lines.FirstOrDefault(x => x.Name == RunwayChange.Field);
+
+            var textBox = line == null ? null : GetTextBox(line.Number);
+
+            var reached = Control.ICAO != null && !Control.IsZulu && textBox != null
+                && RunwayChange.Reached(textBox.Text, DateTime.UtcNow) != null;
+
+            SetHighlight(line, reached, RunwayChangeColour);
+        }
+
+        private void SetHighlight(ATISLine line, bool on, System.Drawing.Color colour)
         {
             var textBox = line == null ? null : GetTextBox(line.Number);
 
@@ -737,11 +792,11 @@ namespace ATISPlugin
                 FieldHighlights.Add(textBox, highlight);
             }
 
-            highlight.Visible = outside && textBox.Visible;
+            highlight.Visible = on && textBox.Visible;
 
             if (!highlight.Visible) return;
 
-            highlight.BackColor = OutsideLimitsColour;
+            highlight.BackColor = colour;
 
             // Follows the field, which moves with the layout.
             var bounds = textBox.Bounds;
@@ -753,7 +808,10 @@ namespace ATISPlugin
             highlight.SendToBack();
         }
 
-        private double RunwayHeading(string runway) => GetRunwayHeading(runway) ?? int.Parse(runway.Substring(0, 2)) * 10;
+        private double RunwayHeading(string runway) => RunwayHeading(Control.ICAO, runway);
+
+        // The runway's magnetic heading, or its number when vatSys has no data for it.
+        public static double RunwayHeading(string icao, string runway) => GetRunwayHeading(icao, runway) ?? int.Parse(runway.Substring(0, 2)) * 10;
 
         // Picks the best runway mode the first time the ATIS has a METAR, once only per ATIS.
         private void AutoSelectMode()
@@ -779,8 +837,8 @@ namespace ATISPlugin
 
             TextBoxMode.Enabled = enabled;
 
-            // Prompt the controller to pick a runway mode first.
-            if (enabled && string.IsNullOrWhiteSpace(Mode))
+            // Prompt the controller to pick a runway mode first, or to save a suggested one.
+            if (enabled && (string.IsNullOrWhiteSpace(Mode) || (Mode == Control.SuggestedMode && Mode != Control.Mode)))
             {
                 LabelMode.ForeColor = Colours.GetColour(Colours.Identities.Warning);
             }
@@ -793,9 +851,26 @@ namespace ATISPlugin
 
             RefreshForm_PresetButtons(enabled);
 
+            RefreshForm_Layout();
+
+            RefreshForm_Highlights();
+        }
+
+        // After the layout, so the frames go where the fields now are.
+        private void RefreshForm_Highlights()
+        {
             RefreshForm_Limits();
 
-            RefreshForm_Layout();
+            RefreshForm_RunwayChange();
+        }
+
+        // A refresh can come just before the window is shown (e.g. when an update opens it), while the fields
+        // still count as hidden, so the highlights are set again once it's visible.
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+
+            if (Visible) RefreshForm_Highlights();
         }
 
         private const int RowTop = 229;
@@ -1258,6 +1333,14 @@ namespace ATISPlugin
                     }
                 }
 
+                // A timed runway mode (curfew, RRO) suggested with its fields.
+                if (Control.SuggestedMode != null)
+                {
+                    Mode = Control.SuggestedMode;
+
+                    SetText(TextBoxMode, Mode);
+                }
+
                 AppliedMetar = Control.METARRaw;
                 AppliedSuggestionsVersion = Control.SuggestionsVersion;
             }
@@ -1702,9 +1785,29 @@ namespace ATISPlugin
             Change(Number);
         });
 
+        // Applies the METAR even when it's the one already loaded (e.g. after Cancel), using the copy vatSys
+        // already has, as requesting an unchanged METAR may not raise a change. A newer one still arrives as usual.
         private void ButtonGetMetar_Click(object sender, EventArgs e)
         {
+            if (Control.ICAO == null)
+            {
+                GetMetar();
+
+                return;
+            }
+
+            Control.ForceMetarUpdate = true;
+
             GetMetar();
+
+            var metar = MET.Instance.GetProducts(new MET.ProductRequest(MET.ProductType.VATSIM_METAR, Control.ICAO, true))?
+                .FirstOrDefault(x => x.Type == MET.ProductType.VATSIM_METAR && x.Text != "No product available.");
+
+            if (metar == null) return;
+
+            Control.UpdateMetar(metar.Text);
+
+            RefreshForm();
         }
 
         private void ButtonCancel_Click(object sender, EventArgs e)
@@ -1838,10 +1941,17 @@ namespace ATISPlugin
                 UpdateWindComponents();
             }
 
+            if (line.METARField == METARField.Wind || line.Name == "RWY")
+            {
+                UpdateAutoAdditions();
+            }
+
             if (line.METARField == METARField.Wind || line.Name == "RWY" || line.Name == "APCH" || line.Name == SurfaceCondition.Field)
             {
                 RefreshForm_Limits();
             }
+
+            if (line.Name == RunwayChange.Field) RefreshForm_RunwayChange();
 
             var save = Saves.FirstOrDefault(x => x.Key == line.Name);
 
@@ -1918,6 +2028,9 @@ namespace ATISPlugin
                     textBox.Text = PresetAirport.Clean(field.Value);
                 }
             }
+
+            // The mode may have replaced a field holding an addition, or be a condition for one.
+            UpdateAutoAdditions();
 
             ButtonSave.Enabled = true;
             ButtonCancel.Enabled = true;
@@ -2261,11 +2374,13 @@ namespace ATISPlugin
             UpdatingWindComponents = false;
         }
 
-        private double? GetRunwayHeading(string runwayName)
-        {
-            if (Control.ICAO == null) return null;
+        private double? GetRunwayHeading(string runwayName) => GetRunwayHeading(Control.ICAO, runwayName);
 
-            var airport = Airspace2.GetAirport(Control.ICAO);
+        private static double? GetRunwayHeading(string icao, string runwayName)
+        {
+            if (icao == null) return null;
+
+            var airport = Airspace2.GetAirport(icao);
 
             if (airport == null) return null;
 
@@ -2277,7 +2392,7 @@ namespace ATISPlugin
 
             if (oppositeRunway == null) return null;
 
-            var variation = Magnetic.Variation(Control.ICAO);
+            var variation = Magnetic.Variation(icao);
 
             if (variation == null) return null;
 
