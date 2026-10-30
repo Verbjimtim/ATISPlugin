@@ -37,7 +37,11 @@
   <AutoAdd Field="SIGWX" Runways="34R" Modes="A,B" Wind="020-070" AboveSpeed="14">TEXT</AutoAdd> on <Airport>
              adds TEXT to the field while every given condition is met, and removes it once one isn't:
              Runways all in RWY, one of Modes selected, any of the WIND direction range within Wind (magnetic,
-             clockwise, inclusive) and the mean speed above AboveSpeed. Checked when WIND, RWY or MODE changes.
+             clockwise, inclusive), the mean speed above AboveSpeed, and the worst case crosswind on a runway in
+             RWY above AboveCrosswind. Checked when WIND, RWY or MODE changes.
+
+  APCH options EXP INST APCH, EXP ILS APCH, EXP GLS APCH and EXP RNP APCH are built in for airports that don't
+  list any APCH values (as presets or in a mode). With no runway mode selected, RWY also offers each runway.
 
   ReportCrosswindFrom="5" on <Airport> adds MX XW to WIND from 5KT crosswind (default: above 10KT).
 
@@ -400,6 +404,7 @@
     <Mode Name="11 PROPS (DUAL ADC)" Priority="2">
       <Field Name="RWY">11L FOR ARRS AND DEPS, FREQ 132.8. RWY 11R FOR CCT TRAINING, FREQ 123.6. RWY 11C IN USE</Field>
     </Mode>
+    <AutoAdd Field="OPR INFO" AboveCrosswind="15">CROSSWIND ALERT, DO NOT PASS THROUGH FINAL FOR YOUR ASSIGNED RUNWAY</AutoAdd>
     <Presets Field="OPR INFO" Multiple="true">
       <Preset>CROSSWIND ALERT, DO NOT PASS THROUGH FINAL FOR YOUR ASSIGNED RUNWAY</Preset>
       <Preset>SY CTA 10 SOUTH OF WS CTR ACTIVE</Preset>

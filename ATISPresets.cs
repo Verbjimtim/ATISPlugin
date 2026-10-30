@@ -145,6 +145,15 @@ namespace ATISPlugin
 
         public bool IsMultiple(string fieldName) => Fields.Any(x => x.Field == fieldName && x.Multiple);
 
+        // Whether the airport lists any values for the field, as presets or in a mode (an empty value counts).
+        public bool DefinesField(string fieldName) =>
+            Fields.Any(x => x.Field == fieldName) || Modes.Any(x => x.Fields.Any(f => f.Name == fieldName));
+
+        // APCH options for airports that don't define their own.
+        public const string ApproachField = "APCH";
+
+        public static readonly string[] DefaultApproaches = { "EXP INST APCH", "EXP ILS APCH", "EXP GLS APCH", "EXP RNP APCH" };
+
         public static string Clean(string value) => (value ?? string.Empty).Trim().TrimEnd('.').Trim().ToUpper();
     }
 
@@ -243,6 +252,10 @@ namespace ATISPlugin
         [XmlAttribute]
         public int AboveSpeed { get; set; }
 
+        // Crosswind (kt) to be exceeded on a runway in RWY: the worst case, as reported in WIND as MX XW.
+        [XmlAttribute]
+        public int AboveCrosswind { get; set; }
+
         [XmlText]
         public string Text { get; set; }
 
@@ -251,7 +264,7 @@ namespace ATISPlugin
         private static List<string> List(string value) =>
             (value ?? string.Empty).Split(',').Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
 
-        public bool Applies(string mode, ICollection<string> runwaysInUse, ATISPlugin.Wind wind)
+        public bool Applies(string mode, ICollection<string> runwaysInUse, ATISPlugin.Wind wind, Func<string, double> heading)
         {
             var modes = List(Modes);
 
@@ -266,6 +279,15 @@ namespace ATISPlugin
                 var directions = DirectionsRegex.Match((Wind ?? string.Empty).Trim());
 
                 if (directions.Success && !wind.Overlaps(int.Parse(directions.Groups[1].Value), int.Parse(directions.Groups[2].Value))) return false;
+            }
+
+            if (AboveCrosswind > 0)
+            {
+                if (wind == null || !runwaysInUse.Any()) return false;
+
+                var crosswind = runwaysInUse.Max(x => Math.Round(Math.Abs(wind.Worst(heading(x)).Crosswind)));
+
+                if (crosswind <= AboveCrosswind) return false;
             }
 
             return true;

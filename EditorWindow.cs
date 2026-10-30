@@ -253,6 +253,11 @@ namespace ATISPlugin
                 options.AddRange(PresetAirport.GetPresets(line.Name, Modes, Mode).Where(x => !options.Contains(x)));
             }
 
+            if (line.Name == PresetAirport.ApproachField && !(PresetAirport?.DefinesField(PresetAirport.ApproachField) ?? false))
+            {
+                options.AddRange(PresetAirport.DefaultApproaches.Where(x => !options.Contains(x)));
+            }
+
             // Without a runway mode, any single runway can be nominated. Airports with SingleRunwayFormat
             // already have these as modes, whose values are listed above.
             if (line.Name == "RWY" && string.IsNullOrEmpty(Mode) &&string.IsNullOrWhiteSpace(PresetAirport?.SingleRunwayFormat))
@@ -300,7 +305,7 @@ namespace ATISPlugin
 
             var wind = windBox == null ? null : Wind.Parse(windBox.Text);
 
-            var runways = runwayBox == null ? new List<string>() : Wind.RunwaysInUse(runwayBox.Text);
+            var runways = runwayBox == null ? new List<string>() : GetRunwaysForWind(runwayBox.Text);
 
             foreach (var autoAdd in PresetAirport.AutoAdds)
             {
@@ -312,7 +317,7 @@ namespace ATISPlugin
 
                 if (textBox == null || text.Length == 0) continue;
 
-                if (autoAdd.Applies(Mode, runways, wind) != ContainsPreset(textBox.Text, text))
+                if (autoAdd.Applies(Mode, runways, wind, RunwayHeading) != ContainsPreset(textBox.Text, text))
                 {
                     textBox.Text = TogglePreset(textBox.Text, text);
                 }
@@ -2009,6 +2014,7 @@ namespace ATISPlugin
 
             if (line.METARField == METARField.Wind || line.Name == "RWY")
             {
+                // May add or remove text in other fields, which come back through here to record it.
                 UpdateAutoAdditions();
             }
 
