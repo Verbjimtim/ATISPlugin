@@ -142,10 +142,10 @@ namespace ATISPlugin
             }
         }
 
-        private void EditorWindow_Load(object sender, EventArgs e)
+        private void EditorWindow_Load(object sender, EventArgs e) => Safely("open the ATIS editor", () =>
         {
             Change(1);
-        }
+        });
 
         private void LoadRunways()
         {
@@ -395,12 +395,12 @@ namespace ATISPlugin
             return true;
         }
 
-        private void FieldMenu_Closed(object sender, ToolStripDropDownClosedEventArgs e)
+        private void FieldMenu_Closed(object sender, ToolStripDropDownClosedEventArgs e) => Safely("close the field list", () =>
         {
             FieldMenuClosedKey = e.CloseReason == ToolStripDropDownCloseReason.AppClicked ? FieldMenuKey : null;
             FieldMenuClosedAt = Environment.TickCount;
             FieldMenuKey = null;
-        }
+        });
 
         private void CreatePresetButtons()
         {
@@ -417,7 +417,7 @@ namespace ATISPlugin
                 Size = new System.Drawing.Size(PresetButtonWidth, PresetButtonWidth)
             };
 
-            ButtonMode.Click += (s, e) => ShowModeMenu();
+            ButtonMode.Click += (s, e) => Safely("open the MODE list", ShowModeMenu);
 
             Controls.Add(ButtonMode);
 
@@ -435,7 +435,7 @@ namespace ATISPlugin
 
                 var buttonNumber = number;
 
-                button.Click += (s, e) => ShowPresetMenu(buttonNumber);
+                button.Click += (s, e) => Safely("open the field list", () => ShowPresetMenu(buttonNumber));
 
                 Controls.Add(button);
 
@@ -484,10 +484,10 @@ namespace ATISPlugin
                 var isTemplate = Template.IsTemplate(preset);
 
                 var item = PresetMenu.Item(
-                    string.IsNullOrEmpty(preset) ? "(BLANK)" : preset,
+                    string.IsNullOrEmpty(preset) ? "(BLANK)" : Template.Display(preset),
                     multiple && !isTemplate && !string.IsNullOrEmpty(preset) && ContainsPreset(textBox.Text, preset));
 
-                item.Click += (s, e) =>
+                item.Click += (s, e) => Safely("use the option", () =>
                 {
                     var value = preset;
 
@@ -500,7 +500,7 @@ namespace ATISPlugin
 
                         var defaults = PresetAirport?.Defaults.ToDictionary(x => x.Name, x => x.Value) ?? new Dictionary<string, string>();
 
-                        using (var templateWindow = new TemplateWindow(preset, runways, defaults, ComboBoxLetter.MenuRenderer))
+                        using (var templateWindow = new TemplateWindow(preset, runways, GetRunwayModes(), defaults, ComboBoxLetter.MenuRenderer))
                         {
                             if (templateWindow.ShowDialog(this) != DialogResult.OK) return;
 
@@ -509,12 +509,36 @@ namespace ATISPlugin
                     }
 
                     textBox.Text = multiple ? TogglePreset(textBox.Text, value) : value;
-                };
+                });
 
                 FieldMenu.Items.Add(item);
             }
 
             FieldMenu.Show(textBox, new System.Drawing.Point(0, textBox.Height));
+        }
+
+        // Modes in MODE list order, best first, that a runway change could be to (not the current one), then each
+        // single runway, by name with their RWY wording.
+        private List<KeyValuePair<string, string>> GetRunwayModes()
+        {
+            var ordered = string.IsNullOrWhiteSpace(Control.METARRaw)
+                ? Modes
+                : RunwaySelection.Rank(Modes, GetRunwayConditions(), RunwayHeading).Select(x => x.Mode).ToList();
+
+            var output = ordered
+                .Where(x => x.Name != Mode)
+                .Select(x => new KeyValuePair<string, string>(x.Name, PresetAirport.Clean(x.Fields.FirstOrDefault(f => f.Name == "RWY")?.Value)))
+                .Where(x => x.Value.Length > 0)
+                .ToList();
+
+            foreach (var runway in GetRunwayNames())
+            {
+                var name = $"RWY {runway}";
+
+                if (output.All(x => x.Key != name)) output.Add(new KeyValuePair<string, string>(name, runway));
+            }
+
+            return output;
         }
 
         private void ShowModeMenu()
@@ -534,7 +558,7 @@ namespace ATISPlugin
             {
                 var item = PresetMenu.Item(name ?? "(NONE)");
 
-                item.Click += (s, e) => SelectMode(name);
+                item.Click += (s, e) => Safely("select the runway mode", () => SelectMode(name));
 
                 FieldMenu.Items.Add(item);
             }
@@ -542,10 +566,10 @@ namespace ATISPlugin
             FieldMenu.Show(TextBoxMode, new System.Drawing.Point(0, TextBoxMode.Height));
         }
 
-        private void TextBoxMode_MouseUp(object sender, MouseEventArgs e)
+        private void TextBoxMode_MouseUp(object sender, MouseEventArgs e) => Safely("open the MODE list", () =>
         {
             ShowModeMenu();
-        }
+        });
 
         private static bool ContainsPreset(string text, string preset) =>
             (text ?? string.Empty).IndexOf(preset, StringComparison.OrdinalIgnoreCase) >= 0;
@@ -944,7 +968,7 @@ namespace ATISPlugin
         {
             base.OnVisibleChanged(e);
 
-            if (Visible) RefreshForm_Highlights();
+            if (Visible) Safely("highlight the fields", RefreshForm_Highlights);
         }
 
         private const int RowTop = 229;
@@ -1822,6 +1846,20 @@ namespace ATISPlugin
             }
         }
 
+        // vatSys has WinForms rethrow exceptions from GUI event handlers, which would take it down, so they're
+        // reported instead. Also used by the template window.
+        internal static void Safely(string action, Action work)
+        {
+            try
+            {
+                work();
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not {action}: {ex.Message}"), Plugin.DisplayName);
+            }
+        }
+
         private async void ButtonCreate_Click(object sender, EventArgs e) => await Safely("create ATIS", async () =>
         {
             if (!Network.IsConnected || !Network.IsValidATC) return;
@@ -1841,7 +1879,7 @@ namespace ATISPlugin
             GetMetar();
         });
 
-        private void ComboBoxAirport_SelectedIndexChanged(object sender, EventArgs e)
+        private void ComboBoxAirport_SelectedIndexChanged(object sender, EventArgs e) => Safely("select the airport", () =>
         {
             if (ComboBoxAirport.SelectedIndex == -1) return;
 
@@ -1865,7 +1903,7 @@ namespace ATISPlugin
             LoadCodes();
 
             LoadModes();
-        }
+        });
 
         private async void ButtonDelete_Click(object sender, EventArgs e) => await Safely("delete ATIS", async () =>
         {
@@ -1876,7 +1914,7 @@ namespace ATISPlugin
 
         // Applies the METAR even when it's the one already loaded (e.g. after Cancel), using the copy vatSys
         // already has, as requesting an unchanged METAR may not raise a change. A newer one still arrives as usual.
-        private void ButtonGetMetar_Click(object sender, EventArgs e)
+        private void ButtonGetMetar_Click(object sender, EventArgs e) => Safely("load the METAR", () =>
         {
             if (Control.ICAO == null)
             {
@@ -1897,9 +1935,9 @@ namespace ATISPlugin
             Control.UpdateMetar(metar.Text);
 
             RefreshForm();
-        }
+        });
 
-        private void ButtonCancel_Click(object sender, EventArgs e)
+        private void ButtonCancel_Click(object sender, EventArgs e) => Safely("cancel the changes", () =>
         {
             ID = Control.ID;
 
@@ -1914,12 +1952,12 @@ namespace ATISPlugin
             RefreshForm_ResetColours();
 
             RefreshForm();
-        }
+        });
 
-        private void ButtonNext_Click(object sender, EventArgs e)
+        private void ButtonNext_Click(object sender, EventArgs e) => Safely("change the ATIS letter", () =>
         {
             IncreaseID();
-        }
+        });
 
         private async void ButtonSave_Click(object sender, EventArgs e) => await Safely("save ATIS", async () =>
         {
@@ -1961,7 +1999,7 @@ namespace ATISPlugin
             RefreshForm();
         });
 
-        private void TextBox_TextChanged(object sender, EventArgs e)
+        private void TextBox_TextChanged(object sender, EventArgs e) => Safely("record the edit", () =>
         {
             if (!(sender is TextBox textBox)) return;
 
@@ -2071,9 +2109,9 @@ namespace ATISPlugin
             {
                 CalculateWind();
             }
-        }
+        });
 
-        private void ComboBoxLetter_SelectedIndexChanged(object sender, EventArgs e)
+        private void ComboBoxLetter_SelectedIndexChanged(object sender, EventArgs e) => Safely("change the ATIS letter", () =>
         {
             if (!(sender is DropDownBox comboBox)) return;
 
@@ -2091,7 +2129,7 @@ namespace ATISPlugin
 
             ButtonSave.Enabled = true;
             ButtonCancel.Enabled = true;
-        }
+        });
 
         private void SelectMode(string selectedMode)
         {
@@ -2128,7 +2166,7 @@ namespace ATISPlugin
             RefreshForm_Presets();
         }
 
-        private void ComboBoxVoice_SelectedIndexChanged(object sender, EventArgs e)
+        private void ComboBoxVoice_SelectedIndexChanged(object sender, EventArgs e) => Safely("change the voice", () =>
         {
             if (!(sender is DropDownBox comboBox)) return;
 
@@ -2153,9 +2191,9 @@ namespace ATISPlugin
                 ComboBoxRate.Visible = true;
                 ButtonRecord.Visible = false;
             }
-        }
+        });
 
-        private void ComboBoxRate_SelectedIndexChanged(object sender, EventArgs e)
+        private void ComboBoxRate_SelectedIndexChanged(object sender, EventArgs e) => Safely("change the speech rate", () =>
         {
             if (!(sender is DropDownBox comboBox)) return;
 
@@ -2192,9 +2230,9 @@ namespace ATISPlugin
 
             ButtonSave.Enabled = true;
             ButtonCancel.Enabled = true;
-        }
+        });
 
-        private void ButtonListen_Click(object sender, EventArgs e)
+        private void ButtonListen_Click(object sender, EventArgs e) => Safely("play the ATIS", () =>
         {
             if (Control.Listening)
             {
@@ -2207,33 +2245,33 @@ namespace ATISPlugin
             }
 
             RefreshForm();
-        }
+        });
 
-        private void ButtonATIS1_Click(object sender, EventArgs e)
+        private void ButtonATIS1_Click(object sender, EventArgs e) => Safely("open ATIS 1", () =>
         {
             Control.SoundPlayer.Stop();
             Change(1);
-        }
+        });
 
-        private void ButtonATIS2_Click(object sender, EventArgs e)
+        private void ButtonATIS2_Click(object sender, EventArgs e) => Safely("open ATIS 2", () =>
         {
             Control.SoundPlayer.Stop();
             Change(2);
-        }
+        });
 
-        private void ButtonATIS3_Click(object sender, EventArgs e)
+        private void ButtonATIS3_Click(object sender, EventArgs e) => Safely("open ATIS 3", () =>
         {
             Control.SoundPlayer.Stop();
             Change(3);
-        }
+        });
 
-        private void ButtonATIS4_Click(object sender, EventArgs e)
+        private void ButtonATIS4_Click(object sender, EventArgs e) => Safely("open ATIS 4", () =>
         {
             Control.SoundPlayer.Stop();
             Change(4);
-        }
+        });
 
-        private void ComboBoxTimeCheck_SelectedIndexChanged(object sender, EventArgs e)
+        private void ComboBoxTimeCheck_SelectedIndexChanged(object sender, EventArgs e) => Safely("change the time check", () =>
         {
             if (!(sender is DropDownBox comboBox)) return;
 
@@ -2249,9 +2287,9 @@ namespace ATISPlugin
 
             ButtonSave.Enabled = true;
             ButtonCancel.Enabled = true;
-        }
+        });
 
-        private void ButtonZulu_Click(object sender, EventArgs e)
+        private void ButtonZulu_Click(object sender, EventArgs e) => Safely("change the Zulu ATIS", () =>
         {
             ID = 'Z';
 
@@ -2273,9 +2311,9 @@ namespace ATISPlugin
             }
 
             RefreshForm();
-        }
+        });
 
-        private void ComboBoxZuluFrequency_SelectedIndexChanged(object sender, EventArgs e)
+        private void ComboBoxZuluFrequency_SelectedIndexChanged(object sender, EventArgs e) => Safely("change the Zulu frequency", () =>
         {
             if (ComboBoxZuluFrequency.SelectedIndex == -1) return;
 
@@ -2286,7 +2324,7 @@ namespace ATISPlugin
             ZuluFrequency = zuluFrequency;
 
             GenerateZulu();
-        }
+        });
 
         private void GenerateZulu()
         {
@@ -2513,12 +2551,12 @@ namespace ATISPlugin
             return airport.Runways.FirstOrDefault(x => x.Name == oppositeRunway);
         }
 
-        private void ComboBoxRunway_SelectedIndexChanged(object sender, EventArgs e)
+        private void ComboBoxRunway_SelectedIndexChanged(object sender, EventArgs e) => Safely("select the runway", () =>
         {
             CalculateWind();
-        }
+        });
 
-        private void ButtonRecord_Click(object sender, EventArgs e)
+        private void ButtonRecord_Click(object sender, EventArgs e) => Safely("record the ATIS", () =>
         {
             if (Control.Recording)
             {
@@ -2530,6 +2568,6 @@ namespace ATISPlugin
             }
 
             RefreshForm();
-        }
+        });
     }
 }

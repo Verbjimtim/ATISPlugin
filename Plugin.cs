@@ -479,32 +479,71 @@ namespace ATISPlugin
             }
         }
 
+        // Raised off the GUI thread, but the editor reads Frequencies there, so it's rebuilt on the GUI thread.
         private void Audio_VSCSFrequenciesChanged(object sender, EventArgs e)
         {
-            Frequencies.Clear();
-
-            var frequenciesUpdate = false;
-
-            foreach (var frequency in Audio.VSCSFrequencies)
+            try
             {
-                if (!frequency.Transmit) continue;
-
-                frequenciesUpdate = true;
-
-                Frequencies.Add(frequency);
+                MMI.InvokeOnGUI(delegate () { UpdateFrequencies(); });
             }
-
-            if (!IsEditorOpen()) return;
-
-            if (Editor != null && !Editor.IsDisposed && frequenciesUpdate)
+            catch (Exception ex)
             {
-                Editor?.RefreshEvent.Invoke(this, null);
+                Errors.Add(new Exception($"Could not update the ATIS frequencies: {ex.Message}"), DisplayName);
             }
         }
 
-        private async void Network_Disconnected(object sender, EventArgs e)
+        private void UpdateFrequencies()
         {
-            await DeleteAll();
+            try
+            {
+                Frequencies.Clear();
+
+                var frequenciesUpdate = false;
+
+                foreach (var frequency in Audio.VSCSFrequencies)
+                {
+                    if (!frequency.Transmit) continue;
+
+                    frequenciesUpdate = true;
+
+                    Frequencies.Add(frequency);
+                }
+
+                if (!IsEditorOpen()) return;
+
+                if (Editor != null && !Editor.IsDisposed && frequenciesUpdate)
+                {
+                    Editor?.RefreshEvent.Invoke(this, null);
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not update the ATIS frequencies: {ex.Message}"), DisplayName);
+            }
+        }
+
+        // Raised on vatSys's network thread, while the editor may be reading the ATIS lines on the GUI thread, so
+        // they're reset there. An exception escaping the delegate would take vatSys down, so it's reported instead.
+        private void Network_Disconnected(object sender, EventArgs e)
+        {
+            try
+            {
+                MMI.InvokeOnGUI(async delegate ()
+                {
+                    try
+                    {
+                        await DeleteAll();
+                    }
+                    catch (Exception ex)
+                    {
+                        Errors.Add(new Exception($"Could not delete the ATIS: {ex.Message}"), DisplayName);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not delete the ATIS: {ex.Message}"), DisplayName);
+            }
         }
 
         // Each ATIS is deleted on its own, so one failing doesn't leave the others connected.
@@ -525,11 +564,19 @@ namespace ATISPlugin
             }
         }
 
+        // Raised by the network and by each ATIS, where an exception would take vatSys down, so it's reported instead.
         private void OnUpdate(object sender, EventArgs e)
         {
-            if (!IsEditorOpen()) return;
+            try
+            {
+                if (!IsEditorOpen()) return;
 
-            Editor?.RefreshEvent.Invoke(this, null);
+                Editor?.RefreshEvent.Invoke(this, null);
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not refresh the ATIS editor: {ex.Message}"), DisplayName);
+            }
         }
 
         private static void PlayUpdateSound()
@@ -594,7 +641,14 @@ namespace ATISPlugin
 
         private void ATISMenu_Click(object sender, EventArgs e)
         {
-            ShowEditorWindow();
+            try
+            {
+                ShowEditorWindow();
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not open the ATIS editor: {ex.Message}"), DisplayName);
+            }
         }
 
         private static bool IsEditorOpen() => Editor != null && !Editor.IsDisposed && Editor.Visible;

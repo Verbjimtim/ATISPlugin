@@ -12,16 +12,24 @@ namespace ATISPlugin
     //   [ACFT TYPE]                        free text
     //   [INTENSITY:LIGHT/MODERATE/STRONG]  choice, named INTENSITY
     //   [RWY], [OTHER RWY]                 choice of runways (any name containing RWY)
+    //   [MODE]                             choice of runway modes (then single runways), filled with its RWY
     //   [TIME]                             free text, starts as the current UTC time
-    //   [TIME+15]                          free text, starts 15 minutes from now
+    //   [TIME+15]                          free text, starts 15 minutes from now, shown as [TIME]
     // An airport's <Default Name="..."> gives the starting value for a blank of that name.
     public static class Template
     {
+        public const string Mode = "MODE";
+
         private static readonly Regex PlaceholderRegex = new Regex("\\[([^\\]]+)\\]");
 
         private static readonly Regex TimeRegex = new Regex("^TIME(?:\\+(\\d+))?$");
 
+        private static readonly Regex TimeOffsetRegex = new Regex("\\[TIME\\+\\d+\\]");
+
         public static bool IsTemplate(string text) => PlaceholderRegex.IsMatch(text ?? string.Empty);
+
+        // The template as shown to the controller: the offset of a [TIME+15] blank only sets its starting value.
+        public static string Display(string text) => TimeOffsetRegex.Replace(text ?? string.Empty, "[TIME]");
 
         public static List<string> Placeholders(string text) =>
             PlaceholderRegex.Matches(text ?? string.Empty).Cast<Match>().Select(x => x.Groups[1].Value).Distinct().ToList();
@@ -74,12 +82,20 @@ namespace ATISPlugin
         private readonly Dictionary<string, Func<string>> Inputs = new Dictionary<string, Func<string>>();
         private readonly Dictionary<string, Label> Labels = new Dictionary<string, Label>();
 
+        // Each runway mode (or single runway) by name, with its RWY wording, for a [MODE] blank.
+        private readonly Dictionary<string, string> RunwayModes = new Dictionary<string, string>();
+
         public string Result { get; private set; }
 
-        public TemplateWindow(string template, List<string> runways, Dictionary<string, string> defaults, ToolStripRenderer menuRenderer)
+        public TemplateWindow(string template, List<string> runways, List<KeyValuePair<string, string>> runwayModes, Dictionary<string, string> defaults, ToolStripRenderer menuRenderer)
         {
             TemplateText = template;
             MenuRenderer = menuRenderer;
+
+            foreach (var runwayMode in runwayModes.Where(x => !RunwayModes.ContainsKey(x.Key)))
+            {
+                RunwayModes.Add(runwayMode.Key, runwayMode.Value);
+            }
 
             Text = "ATIS Template";
             FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -96,7 +112,7 @@ namespace ATISPlugin
                 Location = new Point(8, y),
                 MaximumSize = new Size(WindowWidth - 16, 0),
                 AutoSize = true,
-                Text = template
+                Text = Template.Display(template)
             };
 
             Controls.Add(preview);
@@ -132,6 +148,8 @@ namespace ATISPlugin
                 var initial = Template.Default(placeholder, defaults, utcNow);
 
                 var choices = Template.Choices(placeholder);
+
+                if (choices == null && name == Template.Mode && RunwayModes.Any()) choices = runwayModes.Select(x => x.Key).Distinct().ToList();
 
                 if (choices == null && name.Contains("RWY") && runways.Any()) choices = PairedRunways(template, placeholder, runways);
 
@@ -179,11 +197,11 @@ namespace ATISPlugin
                 Size = new Size(buttonWidth, 28)
             };
 
-            buttonCancel.Click += (s, e) =>
+            buttonCancel.Click += (s, e) => EditorWindow.Safely("close the template", () =>
             {
                 DialogResult = DialogResult.Cancel;
                 Close();
-            };
+            });
 
             Controls.Add(buttonOk);
             Controls.Add(buttonCancel);
@@ -239,7 +257,7 @@ namespace ATISPlugin
                 {
                     var item = PresetMenu.Item(choice, choice == field.Text);
 
-                    item.Click += (s, e) => field.Text = choice;
+                    item.Click += (s, e) => EditorWindow.Safely("use the option", () => field.Text = choice);
 
                     menu.Items.Add(item);
                 }
@@ -247,15 +265,16 @@ namespace ATISPlugin
                 menu.Show(field, new Point(0, field.Height));
             }
 
-            button.Click += (s, e) => ShowMenu();
-            field.MouseUp += (s, e) => ShowMenu();
+            button.Click += (s, e) => EditorWindow.Safely("open the list", ShowMenu);
+            field.MouseUp += (s, e) => EditorWindow.Safely("open the list", ShowMenu);
 
             Controls.Add(button);
 
             return () => field.Text.Trim();
         }
 
-        private void ButtonOk_Click(object sender, EventArgs e)
+        // Errors are reported rather than thrown, which would take vatSys down.
+        private void ButtonOk_Click(object sender, EventArgs e) => EditorWindow.Safely("fill in the template", () =>
         {
             var values = Inputs.ToDictionary(x => x.Key, x => x.Value());
 
@@ -274,11 +293,19 @@ namespace ATISPlugin
 
             if (missing) return;
 
+            // A runway mode is filled with its RWY wording, which starts with the runway number where it has one.
+            foreach (var placeholder in values.Keys.Where(x => Template.Name(x) == Template.Mode).ToList())
+            {
+                if (!RunwayModes.TryGetValue(values[placeholder], out var wording)) continue;
+
+                values[placeholder] = Regex.IsMatch(wording, "^\\d") ? "RWY " + wording : wording;
+            }
+
             Result = Template.Fill(TemplateText, values);
 
             DialogResult = DialogResult.OK;
 
             Close();
-        }
+        });
     }
 }

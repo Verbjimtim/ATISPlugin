@@ -29,10 +29,13 @@
     [ACFT TYPE]                        free text
     [INTENSITY:LIGHT/MODERATE/STRONG]  a choice, labelled INTENSITY
     [RWY], [OTHER RWY]                 the airport's runways (any blank whose name contains RWY)
+    [MODE]                             the airport's runway modes, best first, then each single runway; filled
+                                       with that mode's RWY wording (e.g. "RWY 34L AND R FOR ARRS AND DEPS")
     [TIME]                             free text, starts as the current UTC time
-    [TIME+15]                          free text, starts 15 minutes from now (any number of minutes)
+    [TIME+15]                          free text, starts 15 minutes from now (any number of minutes); shown
+                                       as [TIME]
 
-  <Default Name="DEPARTING VIA">...</Default> on <Airport> gives the starting value for a blank of that name.
+  <Default Name="ACFT TYPE">...</Default> on <Airport> gives the starting value for a blank of that name.
 
   <AutoAdd Field="SIGWX" Runways="34R" Modes="A,B" Wind="020-070" AboveSpeed="14">TEXT</AutoAdd> on <Airport>
              adds TEXT to the field while every given condition is met, and removes it once one isn't:
@@ -199,10 +202,6 @@
     <Presets Field="OPR INFO" Multiple="true">
       <Preset>ALL DEPARTURES MUST REQUEST PUSH BACK ON 127.2</Preset>
     </Presets>
-    <!-- Standard values for the "AIRCRAFT DEPARTING VIA" runway change. -->
-    <Default Name="DEPARTING VIA">MNG, NONIX, AND DOSEL</Default>
-    <Default Name="DEP RWY">34</Default>
-    <Default Name="OTHER RWY">27</Default>
   </Airport>
 
   <Airport ICAO="YBBN" TimeZone="E. Australia Standard Time">
@@ -585,8 +584,7 @@
       <Preset>[ACFT TYPE] REPORTED [INTENSITY:LIGHT/MODERATE/STRONG] [TYPE:UNDER SHOOT/OVER SHOOT] WIND SHEAR AT [MILES] MILES FINAL, RWY [RWY]. AT TIME [TIME]</Preset>
     </Presets>
     <Presets Field="OPR INFO" Multiple="true">
-      <Preset>FROM TIME [TIME+15], EXPECT RWY [RWY]</Preset>
-      <Preset>FROM TIME [TIME+15], AIRCRAFT DEPARTING VIA [DEPARTING VIA] EXPECT RWY [DEP RWY]. RUNWAY [OTHER RWY] FOR ALL OTHER OPERATIONS</Preset>
+      <Preset>FROM TIME [TIME+15], EXPECT [MODE]</Preset>
     </Presets>
   </Airport>
 
@@ -595,8 +593,7 @@
       <Preset>WIND SHEAR WARNING, [ACFT TYPE] REPORTED [INTENSITY:LIGHT/MODERATE/SEVERE] [TYPE:UNDERSHOOT/OVERSHOOT] WINDSHEAR AT [FEET] FT ON FINAL RWY [RWY] AT TIME [TIME]</Preset>
     </Presets>
     <Presets Field="OPR INFO" Multiple="true">
-      <Preset>FM TIME [TIME+15], EXP RWY [RWY]</Preset>
-      <Preset>FM TIME [TIME+15], EXP RWY [RWY] AND R FOR ARR AND DEP</Preset>
+      <Preset>FM TIME [TIME+15], EXP [MODE]</Preset>
     </Presets>
   </Airport>
 
