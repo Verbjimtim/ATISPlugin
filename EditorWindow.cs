@@ -253,6 +253,13 @@ namespace ATISPlugin
                 options.AddRange(PresetAirport.GetPresets(line.Name, Modes, Mode).Where(x => !options.Contains(x)));
             }
 
+            // Without a runway mode, any single runway can be nominated. Airports with SingleRunwayFormat
+            // already have these as modes, whose values are listed above.
+            if (line.Name == "RWY" && string.IsNullOrEmpty(Mode) &&string.IsNullOrWhiteSpace(PresetAirport?.SingleRunwayFormat))
+            {
+                options.AddRange(GetRunwayNames().Where(x => !options.Contains(x)));
+            }
+
             return options;
         }
 
