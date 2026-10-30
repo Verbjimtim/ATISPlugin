@@ -23,9 +23,14 @@ namespace ATISPlugin
         public static string DisplayName => "ATIS Editor";
 
         public static readonly Version Version = new Version(3, 19);
-        private static readonly string VersionUrl = "https://raw.githubusercontent.com/badvectors/ATISPlugin/master/Version.json";
-        private static readonly string ZuluUrl = "https://raw.githubusercontent.com/badvectors/ATISPlugin/master/Zulu.json";
-        private static readonly string CodesUrl = "https://raw.githubusercontent.com/badvectors/ATISPlugin/master/Codes.json";
+        private static readonly string RepositoryUrl = "https://raw.githubusercontent.com/badvectors/ATISPlugin/master";
+        private static readonly string VersionUrl = $"{RepositoryUrl}/Version.json";
+
+        // Config files live in the profile's Plugins\Configs folder. The repository copies are only a fallback
+        // for profiles that don't have them yet.
+        private const string ZuluFile = "Zulu.json";
+        private const string CodesFile = "Codes.json";
+        private const string PresetsFile = "ATISPresets.xml";
 
         private static readonly HttpClient Client = new HttpClient();
 
@@ -47,7 +52,7 @@ namespace ATISPlugin
         }
         public static readonly string ManualVoiceName = "Manual Recording";
         public static string DatasetPath => Path.Combine(Helpers.GetFilesFolder(), "Profiles", ProfileName());
-        public static string PresetsPath => Path.Combine(DatasetPath, "Plugins", "Configs", "ATISPresets.xml");
+        public static string ConfigsPath => Path.Combine(DatasetPath, "Plugins", "Configs");
         public static ATIS ATISData { get; set; }
         public static ATISPresets Presets { get; set; } = new ATISPresets();
         public static List<ZuluInfo> ZuluInfo { get; set; } = new List<ZuluInfo>();
@@ -143,6 +148,8 @@ namespace ATISPlugin
 
             _ = GetCodeBlocks();
 
+            _ = GetPresets();
+
             _ = CheckVersion();
 
             MET.Instance.ProductsChanged += METARChanged;
@@ -191,11 +198,58 @@ namespace ATISPlugin
             catch { }
         }
 
+        // Reads a config file from the profile. If the profile doesn't have it, it's downloaded from the
+        // repository and saved there. A file already in the profile is always used as is.
+        private static async Task<string> GetConfigFile(string fileName)
+        {
+            var path = Path.Combine(ConfigsPath, fileName);
+
+            if (File.Exists(path)) return File.ReadAllText(path);
+
+            var content = await Client.GetStringAsync($"{RepositoryUrl}/{fileName}");
+
+            try
+            {
+                // Only save into a profile that exists, rather than creating one.
+                if (Directory.Exists(DatasetPath))
+                {
+                    Directory.CreateDirectory(ConfigsPath);
+
+                    File.WriteAllText(path, content);
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not save {fileName} to the profile: {ex.Message}"), DisplayName);
+            }
+
+            return content;
+        }
+
+        private static async Task GetPresets()
+        {
+            try
+            {
+                var content = await GetConfigFile(PresetsFile);
+
+                var serializer = new XmlSerializer(typeof(ATISPresets));
+
+                using (var reader = new StringReader(content))
+                {
+                    Presets = (ATISPresets)serializer.Deserialize(reader) ?? new ATISPresets();
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not load ATIS presets: {ex.InnerException?.Message ?? ex.Message}"), DisplayName);
+            }
+        }
+
         private static async Task GetCodeBlocks()
         {
             try
             {
-                var response = await Client.GetStringAsync(CodesUrl);
+                var response = await GetConfigFile(CodesFile);
 
                 var codeBlocks = JsonConvert.DeserializeObject<CodeBlock[]>(response);
 
@@ -214,7 +268,7 @@ namespace ATISPlugin
         {
             try
             {
-                var response = await Client.GetStringAsync(ZuluUrl);
+                var response = await GetConfigFile(ZuluFile);
 
                 var zuluInfo = JsonConvert.DeserializeObject<ZuluInfo[]>(response);
 
@@ -358,15 +412,6 @@ namespace ATISPlugin
         private void GetData()
         {
             ATISData = (ATIS)LoadXML(DatasetPath + "\\ATIS.xml", typeof(ATIS));
-
-            try
-            {
-                Presets = (ATISPresets)LoadXML(PresetsPath, typeof(ATISPresets)) ?? new ATISPresets();
-            }
-            catch (Exception ex)
-            {
-                Errors.Add(new Exception($"Could not load ATIS presets: {ex.InnerException?.Message ?? ex.Message}"), DisplayName);
-            }
         }
 
         public object LoadXML(string filePath, Type type)
