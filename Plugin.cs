@@ -27,8 +27,9 @@ namespace ATISPlugin
 
         private static readonly string RepositoryUrl = "https://raw.githubusercontent.com/badvectors/ATISPlugin/master";
 
-        // Config files live in the profile's Plugins\Configs folder. The repository copies are only a fallback
-        // for profiles that don't have them yet.
+        // Config files live in the profile's Plugins\Configs folder, prefixed ATIS there (e.g. ATISZulu.json) to
+        // tell them apart from other plugins' configs. The repository copies, under these names, are only a
+        // fallback for profiles that don't have them yet.
         private const string ZuluFile = "Zulu.json";
         private const string CodesFile = "Codes.json";
         private const string PresetsFile = "ATISPresets.xml";
@@ -219,7 +220,9 @@ namespace ATISPlugin
         // repository and saved there. A file already in the profile is always used as is.
         private static async Task<string> GetConfigFile(string fileName)
         {
-            var path = ConfigsPath == null ? null : Path.Combine(ConfigsPath, fileName);
+            var profileFileName = fileName.StartsWith("ATIS") ? fileName : "ATIS" + fileName;
+
+            var path = ConfigsPath == null ? null : Path.Combine(ConfigsPath, profileFileName);
 
             if (path != null && File.Exists(path)) return File.ReadAllText(path);
 
@@ -237,7 +240,7 @@ namespace ATISPlugin
             }
             catch (Exception ex)
             {
-                Errors.Add(new Exception($"Could not save {fileName} to the profile: {ex.Message}"), DisplayName);
+                Errors.Add(new Exception($"Could not save {profileFileName} to the profile: {ex.Message}"), DisplayName);
             }
 
             return content;
