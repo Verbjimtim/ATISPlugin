@@ -349,9 +349,41 @@ namespace ATISPlugin
         private ContextMenuStrip FieldMenu;
         private PresetButton ButtonMode;
 
+        // Which menu is open (the MODE field, or a line's number), and which one a click outside last closed.
+        // That click goes on to the control clicked, so if it's the one that opened the menu, the menu stays
+        // closed rather than opening again.
+        private string FieldMenuKey;
+        private string FieldMenuClosedKey;
+        private int FieldMenuClosedAt;
+
+        private const int ReopenAfter = 500;
+
+        private bool ShowFieldMenu(string key)
+        {
+            if (key == FieldMenuClosedKey && Environment.TickCount - FieldMenuClosedAt < ReopenAfter)
+            {
+                FieldMenuClosedKey = null;
+
+                return false;
+            }
+
+            FieldMenuKey = key;
+
+            return true;
+        }
+
+        private void FieldMenu_Closed(object sender, ToolStripDropDownClosedEventArgs e)
+        {
+            FieldMenuClosedKey = e.CloseReason == ToolStripDropDownCloseReason.AppClicked ? FieldMenuKey : null;
+            FieldMenuClosedAt = Environment.TickCount;
+            FieldMenuKey = null;
+        }
+
         private void CreatePresetButtons()
         {
             FieldMenu = PresetMenu.Create(ComboBoxLetter.MenuRenderer);
+
+            FieldMenu.Closed += FieldMenu_Closed;
 
             TextBoxMode.Width = TextBoxWidth - PresetButtonWidth - 4;
 
@@ -416,6 +448,8 @@ namespace ATISPlugin
 
             if (textBox == null || line == null || PresetButtons[number].Tag == null) return;
 
+            if (!ShowFieldMenu(number.ToString())) return;
+
             var multiple = IsMultiple(line.Name);
 
             FieldMenu.Items.Clear();
@@ -463,6 +497,8 @@ namespace ATISPlugin
         private void ShowModeMenu()
         {
             if (!ButtonMode.Enabled) return;
+
+            if (!ShowFieldMenu("MODE")) return;
 
             FieldMenu.Items.Clear();
 
