@@ -211,6 +211,25 @@ namespace ATISPlugin
 
         private List<PresetMode> Modes { get; set; } = new List<PresetMode>();
 
+        // The modes offered now: not those for the other season (e.g. AEST curfew wording during AEDT), except the
+        // selected mode, which stays listed if the season changes while it's in use.
+        private List<PresetMode> VisibleModes
+        {
+            get
+            {
+                var timeZone = PresetAirport?.GetTimeZone();
+
+                var utcNow = DateTime.UtcNow;
+
+                return Modes.Where(x => x.Name == Mode || x.AppliesAt(utcNow, timeZone)).ToList();
+            }
+        }
+
+        // The modes offered now, best first for the current wind and weather when there's a METAR to judge by.
+        private List<PresetMode> OrderedModes() => string.IsNullOrWhiteSpace(Control.METARRaw)
+            ? VisibleModes
+            : RunwaySelection.Rank(VisibleModes, GetRunwayConditions(), RunwayHeading).Select(x => x.Mode).ToList();
+
         private IEnumerable<string> GetRunwayNames() => RunwayNames(Airport);
 
         public static IEnumerable<string> RunwayNames(Airspace2.Airport airport)
@@ -259,7 +278,7 @@ namespace ATISPlugin
 
             if (PresetAirport != null)
             {
-                options.AddRange(PresetAirport.GetPresets(line.Name, Modes, Mode).Where(x => !options.Contains(x)));
+                options.AddRange(PresetAirport.GetPresets(line.Name, VisibleModes, Mode).Where(x => !options.Contains(x)));
             }
 
             if (line.Name == PresetAirport.ApproachField)
@@ -484,7 +503,8 @@ namespace ATISPlugin
 
                 var item = PresetMenu.Item(
                     string.IsNullOrEmpty(preset) ? "(BLANK)" : Template.Display(preset),
-                    multiple && !isTemplate && !string.IsNullOrEmpty(preset) && ContainsPreset(textBox.Text, preset));
+                    multiple && !isTemplate && !string.IsNullOrEmpty(preset) && ContainsPreset(textBox.Text, preset),
+                    multiple);
 
                 item.Click += (s, e) => Safely("use the option", () =>
                 {
@@ -520,11 +540,7 @@ namespace ATISPlugin
         // single runway, by name with their RWY wording.
         private List<KeyValuePair<string, string>> GetRunwayModes()
         {
-            var ordered = string.IsNullOrWhiteSpace(Control.METARRaw)
-                ? Modes
-                : RunwaySelection.Rank(Modes, GetRunwayConditions(), RunwayHeading).Select(x => x.Mode).ToList();
-
-            var output = ordered
+            var output = OrderedModes()
                 .Where(x => x.Name != Mode)
                 .Select(x => new KeyValuePair<string, string>(x.Name, PresetAirport.Clean(x.Fields.FirstOrDefault(f => f.Name == "RWY")?.Value)))
                 .Where(x => x.Value.Length > 0)
@@ -548,12 +564,7 @@ namespace ATISPlugin
 
             FieldMenu.Items.Clear();
 
-            // Best first for the current wind and weather, when there's a METAR to judge by.
-            var ordered = string.IsNullOrWhiteSpace(Control.METARRaw)
-                ? Modes
-                : RunwaySelection.Rank(Modes, GetRunwayConditions(), RunwayHeading).Select(x => x.Mode).ToList();
-
-            foreach (var name in new[] { (string)null }.Concat(ordered.Select(x => x.Name)))
+            foreach (var name in new[] { (string)null }.Concat(OrderedModes().Select(x => x.Name)))
             {
                 var item = PresetMenu.Item(name ?? "(NONE)");
 
@@ -854,9 +865,32 @@ namespace ATISPlugin
                 }
             }
 
+            // An empty APCH means visual approaches: an error with more than one arrival runway, and outside the
+            // limits when the cloud base or visibility doesn't allow them.
+            var approachError = false;
+
+            if (active && approachBox != null && string.IsNullOrWhiteSpace(approachBox.Text) && runwayBox != null)
+            {
+                var arrivals = Wind.ArrivalRunways(runwayBox.Text);
+
+                if (arrivals.Count > 1 && !(PresetAirport?.ParallelVisual ?? false))
+                {
+                    approachError = true;
+                }
+                else if (arrivals.Any())
+                {
+                    var visualCeiling = PresetAirport?.VisualCeiling ?? PresetAirport.DefaultVisualCeiling;
+
+                    approachOutside = conditions.Ceiling < visualCeiling || conditions.Visibility <= PresetAirport.VisualVisibility;
+                }
+            }
+
             SetHighlight(runwayLine, runwayOutside, OutsideLimitsColour);
-            SetHighlight(approachLine, approachOutside, OutsideLimitsColour);
+            SetHighlight(approachLine, approachOutside || approachError, approachError ? ErrorColour : OutsideLimitsColour);
         }
+
+        // The profile's emergency red, for an ATIS that has to be wrong.
+        private static System.Drawing.Color ErrorColour => Colours.GetColour(Colours.Identities.Emergency);
 
         // The profile's VSCS active frequency green.
         private static System.Drawing.Color RunwayChangeColour => Colours.GetColour(Colours.Identities.VSCSActiveFrequency);

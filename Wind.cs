@@ -82,6 +82,18 @@ namespace ATISPlugin
             return output.Distinct().ToList();
         }
 
+        // Runways used for arrivals: those in RWY clauses mentioning ARR/ARRS (e.g. 34L from "34L FOR ARRS, RWY 16L
+        // FOR DEPS"), or every runway when no clause does (e.g. "34L", for all operations). Clauses are split at
+        // ". " and ", " so a frequency such as 132.8 stays whole.
+        public static List<string> ArrivalRunways(string text)
+        {
+            var clauses = Regex.Split(text ?? string.Empty, "[.,]\\s+").Select(x => x.Trim()).ToList();
+
+            var arrivals = clauses.Where(x => Regex.IsMatch(x, "\\bARRS?\\b")).ToList();
+
+            return arrivals.Any() ? arrivals.SelectMany(RunwaysInUse).Distinct().ToList() : RunwaysInUse(text);
+        }
+
         // Runway direction (e.g. 34 for 34L and 34R).
         public static string Direction(string runway) => runway.Substring(0, 2);
 

@@ -28,6 +28,8 @@ namespace ATISPlugin
                 SingleRunwayFormat = matches.Select(x => x.SingleRunwayFormat).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)),
                 ReportCrosswindFrom = matches.Select(x => x.ReportCrosswindFrom).Where(x => x != PresetAirport.DefaultReportCrosswindFrom).DefaultIfEmpty(PresetAirport.DefaultReportCrosswindFrom).First(),
                 TimeZone = matches.Select(x => x.TimeZone).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)),
+                VisualCeiling = matches.Select(x => x.VisualCeiling).Where(x => x != PresetAirport.DefaultVisualCeiling).DefaultIfEmpty(PresetAirport.DefaultVisualCeiling).First(),
+                ParallelVisual = matches.Any(x => x.ParallelVisual),
                 Modes = matches.SelectMany(x => x.Modes).ToList(),
                 Fields = matches.SelectMany(x => x.Fields).ToList(),
                 Defaults = matches.SelectMany(x => x.Defaults).GroupBy(x => x.Name).Select(x => x.First()).ToList(),
@@ -50,9 +52,24 @@ namespace ATISPlugin
         [XmlAttribute]
         public int ReportCrosswindFrom { get; set; } = DefaultReportCrosswindFrom;
 
-        // When set, adds a "RWY xx" mode for each runway, setting RWY to this text with {RWY} replaced.
+        // Adds a "RWY xx" mode for each runway, setting RWY to this text with {RWY} replaced. Airports with modes
+        // get these as just the runway ("{RWY}") without it, so a single runway can always be picked as a mode.
         [XmlAttribute]
         public string SingleRunwayFormat { get; set; }
+
+        // Lowest cloud base (ft) for visual approaches, from the SOP. An empty APCH (visual) is flagged below it, or
+        // with visibility 5000M or less.
+        public const int DefaultVisualCeiling = 3000;
+
+        [XmlAttribute]
+        public int VisualCeiling { get; set; } = DefaultVisualCeiling;
+
+        public const int VisualVisibility = 5000;
+
+        // Parallel runway arrivals with an empty APCH are normal here (class D circuits), so they're only checked
+        // against the visual minima rather than flagged as an error.
+        [XmlAttribute]
+        public bool ParallelVisual { get; set; }
 
         // Windows time zone ID (e.g. "AUS Eastern Standard Time") for modes with local Hours.
         [XmlAttribute]
@@ -90,7 +107,9 @@ namespace ATISPlugin
         {
             var output = Modes.ToList();
 
-            if (string.IsNullOrWhiteSpace(SingleRunwayFormat) || runways == null) return output;
+            var format = !string.IsNullOrWhiteSpace(SingleRunwayFormat) ? SingleRunwayFormat : Modes.Any() ? "{RWY}" : null;
+
+            if (format == null || runways == null) return output;
 
             foreach (var runway in runways)
             {
@@ -100,7 +119,7 @@ namespace ATISPlugin
 
                 var mode = new PresetMode { Name = name, Generated = true };
 
-                mode.Fields.Add(new PresetModeField { Name = "RWY", Value = SingleRunwayFormat.Replace("{RWY}", runway) });
+                mode.Fields.Add(new PresetModeField { Name = "RWY", Value = format.Replace("{RWY}", runway) });
 
                 output.Add(mode);
             }
@@ -127,7 +146,10 @@ namespace ATISPlugin
                 foreach (var field in selected.Fields.Where(x => x.Name == fieldName)) Add(field.Value);
             }
 
-            foreach (var field in Fields.Where(x => x.Field == fieldName && x.AppliesTo(selected?.Name)))
+            var utcNow = DateTime.UtcNow;
+            var timeZone = GetTimeZone();
+
+            foreach (var field in Fields.Where(x => x.Field == fieldName && x.AppliesTo(selected?.Name) && x.AppliesAt(utcNow, timeZone)))
             {
                 foreach (var preset in field.Presets) Add(preset);
             }
@@ -186,13 +208,24 @@ namespace ATISPlugin
         [XmlAttribute]
         public string Hours { get; set; }
 
-        // "true" or "false" to limit the hours to daylight saving time or standard time (e.g. AEDT and AEST wording).
+        // "true" or "false" to limit the mode to daylight saving time or standard time (e.g. AEDT and AEST wording).
+        // Outside its season it isn't listed.
         [XmlAttribute]
         public string DaylightSaving { get; set; }
 
         public bool IsTimed => !string.IsNullOrWhiteSpace(Hours);
 
         private static readonly Regex HoursRegex = new Regex("^(\\d{2})(\\d{2})-(\\d{2})(\\d{2})$");
+
+        // Whether it's the mode's season. Without the airport's time zone, both seasons' modes are offered.
+        public bool AppliesAt(DateTime utcNow, TimeZoneInfo timeZone)
+        {
+            if (!bool.TryParse(DaylightSaving, out var daylightSaving) || timeZone == null) return true;
+
+            var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc), timeZone);
+
+            return timeZone.IsDaylightSavingTime(local) == daylightSaving;
+        }
 
         public bool InPeriod(DateTime utcNow, TimeZoneInfo timeZone)
         {
@@ -202,9 +235,9 @@ namespace ATISPlugin
 
             if (!match.Success) return false;
 
-            var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc), timeZone);
+            if (!AppliesAt(utcNow, timeZone)) return false;
 
-            if (bool.TryParse(DaylightSaving, out var daylightSaving) && timeZone.IsDaylightSavingTime(local) != daylightSaving) return false;
+            var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc), timeZone);
 
             var now = local.Hour * 60 + local.Minute;
             var start = int.Parse(match.Groups[1].Value) * 60 + int.Parse(match.Groups[2].Value);
@@ -329,6 +362,10 @@ namespace ATISPlugin
         [XmlAttribute]
         public string Modes { get; set; }
 
+        // "true" or "false" to limit the presets to daylight saving time or standard time (e.g. curfew times in UTC).
+        [XmlAttribute]
+        public string DaylightSaving { get; set; }
+
         [XmlElement("Preset")]
         public List<string> Presets { get; set; } = new List<string>();
 
@@ -337,6 +374,16 @@ namespace ATISPlugin
             if (string.IsNullOrWhiteSpace(Modes) || mode == null) return true;
 
             return Modes.Split(',').Any(x => x.Trim() == mode);
+        }
+
+        // Without the airport's time zone, both sets are offered.
+        public bool AppliesAt(DateTime utcNow, TimeZoneInfo timeZone)
+        {
+            if (!bool.TryParse(DaylightSaving, out var daylightSaving) || timeZone == null) return true;
+
+            var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc), timeZone);
+
+            return timeZone.IsDaylightSavingTime(local) == daylightSaving;
         }
     }
 }

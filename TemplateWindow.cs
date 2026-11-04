@@ -255,7 +255,7 @@ namespace ATISPlugin
 
                 foreach (var choice in choices)
                 {
-                    var item = PresetMenu.Item(choice, choice == field.Text);
+                    var item = PresetMenu.Item(choice, choice == field.Text, true);
 
                     item.Click += (s, e) => EditorWindow.Safely("use the option", () => field.Text = choice);
 

@@ -15,7 +15,8 @@
                             it's preferred over other modes; outside them it's never picked automatically.
                             When the hours start or end, the best mode is suggested (popup, sound and MODE
                             highlighted) if that changes to or from a timed mode, and saved or cancelled as usual.
-    DaylightSaving="true"   limits Hours to daylight saving time ("false": standard time), e.g. AEDT/AEST wording.
+    DaylightSaving="true"   limits the mode to daylight saving time ("false": standard time), e.g. AEDT/AEST wording.
+                            Outside that season it isn't listed (unless it's the selected mode).
     Runways="10L,10R|28L,28R"  runways to check against the wind when the RWY text names both ends.
   A mode is usable with up to 20KT crosswind and 5KT tailwind (none when wet) on each of its runways.
 
@@ -24,6 +25,8 @@
   <Presets>  Options shown on a field's arrow button. With a mode selected, only that mode's value and
              presets for that mode (Modes="A,B") or for all modes (no Modes attribute) are shown.
              Multiple="true" toggles each preset in or out of the field instead of replacing it.
+             DaylightSaving="true" (or "false") offers them only in daylight saving (or standard) time, using
+             TimeZone on <Airport>, e.g. for times given in UTC.
 
   Template presets contain blanks in square brackets, filled in when selected:
     [ACFT TYPE]                        free text
@@ -60,7 +63,14 @@
 
   SingleRunwayFormat="..." on <Airport> adds a "RWY xx" mode for every runway at the airport (from the
   vatSys airport data). It sets RWY to the given text with {RWY} replaced by the runway number.
+  Airports with modes get these anyway, setting RWY to just the runway, ranked after the listed modes.
   A <Mode> with the same name (e.g. "RWY 07") takes precedence.
+
+  VisualCeiling="3100" on <Airport> is the lowest cloud base (ft) for visual approaches (default 3000). With APCH
+  empty, APCH gets an orange frame when one arrival runway is in use and the cloud base is below it or the
+  visibility is 5000M or less, and a red frame when more than one arrival runway is in use. Arrival runways are
+  those in RWY clauses mentioning ARR or ARRS, or every runway in RWY when none does.
+  ParallelVisual="true" on <Airport> (class D parallel runways) treats more than one arrival runway like one.
 
   Field names must match the Input names in the profile's ATIS.xml (APCH, RWY, SFC COND, OPR INFO, SIGWX).
   RWY values leave out the leading "RWY" because the field name is already spoken.
@@ -71,7 +81,7 @@
 
   <!-- ===================== Class C ===================== -->
 
-  <Airport ICAO="YSSY" TimeZone="AUS Eastern Standard Time">
+  <Airport ICAO="YSSY" VisualCeiling="3100" TimeZone="AUS Eastern Standard Time">
     <Mode Name="34 PROPS IVA" Priority="2" MinCeiling="3100" MinVisibility="6000">
       <Field Name="APCH">EXP INDEP VISUAL APCH, DO NOT PASS THRU ASSIGNED RWY CL</Field>
       <Field Name="RWY">34L AND R FOR ARRS AND DEPS</Field>
@@ -163,6 +173,14 @@
     </Presets>
     <AutoAdd Field="SIGWX" Runways="34R" Wind="020-070" AboveSpeed="14">CAUTION POSSIBLE TURBULENCE ON FINAL RUNWAY 34R</AutoAdd>
     <AutoAdd Field="OPR INFO" Modes="34 PROPS IVA,34 PROPS INSTR THEN IVA,34 PROPS INSTR" Wind="260-310" AboveSpeed="5">CAUTION POSSIBLE WAKE TURBULENCE</AutoAdd>
+    <!-- Notice ahead of the 2300 local curfew: departures restricted from 15 minutes before, arrivals 34L from
+         the start. "FROM TIME" alerts like a runway change when the time is reached. -->
+    <Presets Field="OPR INFO" Multiple="true" DaylightSaving="true">
+      <Preset>CURFEW RESTRICTIONS APPLY FROM TIME 1145, ARRS RWY 34L AFTER TIME 1200. ALL DEPS 16 DIRECTION AFTER TIME 1145</Preset>
+    </Presets>
+    <Presets Field="OPR INFO" Multiple="true" DaylightSaving="false">
+      <Preset>CURFEW RESTRICTIONS APPLY FROM TIME 1245, ARRS RWY 34L AFTER TIME 1300. ALL DEPS 16 DIRECTION AFTER TIME 1245</Preset>
+    </Presets>
     <Presets Field="OPR INFO" Multiple="true">
       <Preset>WHEN READY FOR PUSH BACK OR TAXI CTC COORDINATOR 127.6</Preset>
       <Preset>START APPROVAL RQ. WHEN READY FOR PUSH BACK OR ENGINE START, CTC SYDNEY COORDINATOR ON FREQ 127.6, FOR START TIME</Preset>
@@ -232,7 +250,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YPPH">
+  <Airport ICAO="YPPH" VisualCeiling="3300">
     <Mode Name="SOUTHWEST PLAN">
       <Field Name="APCH">EXP ILS APCH RWY 21. EXP RNP APCH RWY 24</Field>
       <Field Name="RWY">21 AND RWY 24 FOR ARR. RWY 21 FOR DEP</Field>
@@ -292,8 +310,10 @@
       <Preset>EXP INST APCH</Preset>
       <Preset />
     </Presets>
-    <Presets Field="OPR INFO" Multiple="true">
+    <Presets Field="OPR INFO" Multiple="true" DaylightSaving="false">
       <Preset>CURFEW IN OPERATION UNTIL TIME 2030</Preset>
+    </Presets>
+    <Presets Field="OPR INFO" Multiple="true" DaylightSaving="true">
       <Preset>CURFEW IN OPERATION UNTIL TIME 1930</Preset>
     </Presets>
   </Airport>
@@ -416,7 +436,7 @@
   <!-- Metro class D: MX XW is reported from 5KT (ReportCrosswindFrom). PROPS modes are split by direction,
        with RWY giving that direction's runways from the SOP formats (which list both ends together). -->
 
-  <Airport ICAO="YBAF" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5">
+  <Airport ICAO="YBAF" VisualCeiling="2900" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5" ParallelVisual="true">
     <Mode Name="10 PROPS" Priority="1">
       <Field Name="RWY">10L FOR ARRS AND DEPS NORTH. RWY 10R FOR ARRS AND DEPS SOUTH</Field>
     </Mode>
@@ -454,7 +474,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YSBK" ReportCrosswindFrom="5">
+  <Airport ICAO="YSBK" ReportCrosswindFrom="5" ParallelVisual="true">
     <Mode Name="29 PROPS" Priority="1">
       <Field Name="RWY">29R FOR ARRS AND DEPS. RWY 29L FOR CCT TRAINING. RWY 29C IN USE</Field>
     </Mode>
@@ -474,7 +494,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YSCN" ReportCrosswindFrom="5">
+  <Airport ICAO="YSCN" VisualCeiling="3500" ReportCrosswindFrom="5">
     <Presets Field="APCH">
       <Preset>EXP INST APCH</Preset>
       <Preset />
@@ -484,7 +504,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YPJT" ReportCrosswindFrom="5">
+  <Airport ICAO="YPJT" ReportCrosswindFrom="5" ParallelVisual="true">
     <Mode Name="06 PROPS" Priority="1">
       <Field Name="RWY">06R FOR CCTS AND DEPS VIA ARMADALE SHOPS. RWY 06L FOR ARRS AND ALL OTHER DEPS</Field>
     </Mode>
@@ -505,7 +525,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YMMB" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5">
+  <Airport ICAO="YMMB" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5" ParallelVisual="true">
     <Mode Name="17 PROPS" Priority="1">
       <Field Name="RWY">17L FOR ARRS AND DEPS EAST. RWY 17R FOR ARRS AND DEPS WEST</Field>
     </Mode>
@@ -532,7 +552,7 @@
     </Mode>
   </Airport>
 
-  <Airport ICAO="YPPF" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5">
+  <Airport ICAO="YPPF" VisualCeiling="2100" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5" ParallelVisual="true">
     <Mode Name="03 PROPS" Priority="1">
       <Field Name="RWY">03R FOR ARRS AND DEPS EAST. RWY 03L FOR ARRS AND DEPS WEST</Field>
     </Mode>
@@ -565,7 +585,7 @@
 
   <!-- ===================== Procedural ===================== -->
 
-  <Airport ICAO="YSTW">
+  <Airport ICAO="YSTW" ParallelVisual="true">
     <Mode Name="12 PROPS" Priority="1">
       <Field Name="RWY">12L AND R FOR ARRS AND DEPS</Field>
       <Field Name="OPR INFO">SIMUL PARL RWY OPS IN USE. EXP TFC ON FINAL AND OPP BASE OF THE PARL RWY</Field>
