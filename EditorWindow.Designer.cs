@@ -40,6 +40,7 @@ namespace ATISPlugin
             this.ComboBoxTimeCheck.Items = new List<string>();
             this.ComboBoxLetter = new DropDownBox();
             this.ComboBoxLetter.Items = new List<string>();
+            this.TextBoxMode = new TextField();
             this.ComboBoxZuluFrequency = new DropDownBox();
             this.ComboBoxZuluFrequency.Items = new List<string>();
             this.ComboBoxRunway = new DropDownBox();
@@ -78,6 +79,7 @@ namespace ATISPlugin
             this.LabelTimeCheck = new Label();
             this.ButtonNext = new GenericButton();
             this.LabelATIS = new Label();
+            this.LabelMode = new Label();
             this.LabelMETAR = new TextLabel();
             this.ButtonSave = new GenericButton();
             this.ButtonCancel = new GenericButton();
@@ -128,7 +130,7 @@ namespace ATISPlugin
             // TextBox1
             // 
             this.TextBox1.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
-            this.TextBox1.Location = new System.Drawing.Point(172, 229);
+            this.TextBox1.Location = new System.Drawing.Point(172, 260);
             this.TextBox1.Name = "TextBox1";
             this.TextBox1.Size = new System.Drawing.Size(492, 25);
             this.TextBox1.TabIndex = 5;
@@ -136,7 +138,7 @@ namespace ATISPlugin
             // TextBox2
             // 
             this.TextBox2.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
-            this.TextBox2.Location = new System.Drawing.Point(172, 260);
+            this.TextBox2.Location = new System.Drawing.Point(172, 291);
             this.TextBox2.Name = "TextBox2";
             this.TextBox2.Size = new System.Drawing.Size(492, 25);
             this.TextBox2.TabIndex = 6;
@@ -144,7 +146,7 @@ namespace ATISPlugin
             // TextBox3
             // 
             this.TextBox3.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
-            this.TextBox3.Location = new System.Drawing.Point(172, 291);
+            this.TextBox3.Location = new System.Drawing.Point(172, 322);
             this.TextBox3.Name = "TextBox3";
             this.TextBox3.Size = new System.Drawing.Size(492, 25);
             this.TextBox3.TabIndex = 7;
@@ -152,7 +154,7 @@ namespace ATISPlugin
             // Label1
             // 
             this.Label1.AutoSize = true;
-            this.Label1.Location = new System.Drawing.Point(8, 232);
+            this.Label1.Location = new System.Drawing.Point(8, 263);
             this.Label1.MinimumSize = new System.Drawing.Size(160, 17);
             this.Label1.Name = "Label1";
             this.Label1.Size = new System.Drawing.Size(160, 17);
@@ -163,7 +165,7 @@ namespace ATISPlugin
             // Label2
             // 
             this.Label2.AutoSize = true;
-            this.Label2.Location = new System.Drawing.Point(8, 263);
+            this.Label2.Location = new System.Drawing.Point(8, 294);
             this.Label2.MinimumSize = new System.Drawing.Size(160, 17);
             this.Label2.Name = "Label2";
             this.Label2.Size = new System.Drawing.Size(160, 17);
@@ -174,7 +176,7 @@ namespace ATISPlugin
             // Label3
             // 
             this.Label3.AutoSize = true;
-            this.Label3.Location = new System.Drawing.Point(8, 294);
+            this.Label3.Location = new System.Drawing.Point(8, 325);
             this.Label3.MinimumSize = new System.Drawing.Size(160, 17);
             this.Label3.Name = "Label3";
             this.Label3.Size = new System.Drawing.Size(160, 17);
@@ -185,7 +187,7 @@ namespace ATISPlugin
             // TextBox5
             // 
             this.TextBox5.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
-            this.TextBox5.Location = new System.Drawing.Point(172, 353);
+            this.TextBox5.Location = new System.Drawing.Point(172, 384);
             this.TextBox5.Name = "TextBox5";
             this.TextBox5.Size = new System.Drawing.Size(492, 25);
             this.TextBox5.TabIndex = 9;
@@ -193,7 +195,7 @@ namespace ATISPlugin
             // TextBox6
             // 
             this.TextBox6.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
-            this.TextBox6.Location = new System.Drawing.Point(172, 384);
+            this.TextBox6.Location = new System.Drawing.Point(172, 415);
             this.TextBox6.Name = "TextBox6";
             this.TextBox6.Size = new System.Drawing.Size(492, 25);
             this.TextBox6.TabIndex = 10;
@@ -201,7 +203,7 @@ namespace ATISPlugin
             // TextBox7
             // 
             this.TextBox7.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
-            this.TextBox7.Location = new System.Drawing.Point(172, 415);
+            this.TextBox7.Location = new System.Drawing.Point(172, 446);
             this.TextBox7.Name = "TextBox7";
             this.TextBox7.Size = new System.Drawing.Size(492, 25);
             this.TextBox7.TabIndex = 11;
@@ -209,7 +211,7 @@ namespace ATISPlugin
             // TextBox8
             // 
             this.TextBox8.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
-            this.TextBox8.Location = new System.Drawing.Point(172, 446);
+            this.TextBox8.Location = new System.Drawing.Point(172, 477);
             this.TextBox8.Name = "TextBox8";
             this.TextBox8.Size = new System.Drawing.Size(492, 25);
             this.TextBox8.TabIndex = 12;
@@ -217,7 +219,7 @@ namespace ATISPlugin
             // TextBox9
             // 
             this.TextBox9.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
-            this.TextBox9.Location = new System.Drawing.Point(172, 477);
+            this.TextBox9.Location = new System.Drawing.Point(172, 508);
             this.TextBox9.Name = "TextBox9";
             this.TextBox9.Size = new System.Drawing.Size(492, 25);
             this.TextBox9.TabIndex = 13;
@@ -225,7 +227,7 @@ namespace ATISPlugin
             // TextBox10
             // 
             this.TextBox10.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
-            this.TextBox10.Location = new System.Drawing.Point(172, 508);
+            this.TextBox10.Location = new System.Drawing.Point(172, 539);
             this.TextBox10.Name = "TextBox10";
             this.TextBox10.Size = new System.Drawing.Size(492, 25);
             this.TextBox10.TabIndex = 14;
@@ -233,7 +235,7 @@ namespace ATISPlugin
             // TextBox11
             // 
             this.TextBox11.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
-            this.TextBox11.Location = new System.Drawing.Point(172, 539);
+            this.TextBox11.Location = new System.Drawing.Point(172, 570);
             this.TextBox11.Name = "TextBox11";
             this.TextBox11.Size = new System.Drawing.Size(492, 25);
             this.TextBox11.TabIndex = 15;
@@ -241,7 +243,7 @@ namespace ATISPlugin
             // TextBox12
             // 
             this.TextBox12.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
-            this.TextBox12.Location = new System.Drawing.Point(172, 569);
+            this.TextBox12.Location = new System.Drawing.Point(172, 600);
             this.TextBox12.Name = "TextBox12";
             this.TextBox12.Size = new System.Drawing.Size(492, 25);
             this.TextBox12.TabIndex = 16;
@@ -251,7 +253,7 @@ namespace ATISPlugin
             this.ComboBoxTimeCheck.Items = new List<string>{
             "True",
             "False"};
-            this.ComboBoxTimeCheck.Location = new System.Drawing.Point(172, 600);
+            this.ComboBoxTimeCheck.Location = new System.Drawing.Point(172, 631);
             this.ComboBoxTimeCheck.Name = "ComboBoxTimeCheck";
             this.ComboBoxTimeCheck.Size = new System.Drawing.Size(160, 25);
             this.ComboBoxTimeCheck.TabIndex = 17;
@@ -260,7 +262,7 @@ namespace ATISPlugin
             // Label4
             // 
             this.Label4.AutoSize = true;
-            this.Label4.Location = new System.Drawing.Point(8, 325);
+            this.Label4.Location = new System.Drawing.Point(8, 356);
             this.Label4.MinimumSize = new System.Drawing.Size(160, 17);
             this.Label4.Name = "Label4";
             this.Label4.Size = new System.Drawing.Size(160, 17);
@@ -271,7 +273,7 @@ namespace ATISPlugin
             // TextBox4
             // 
             this.TextBox4.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
-            this.TextBox4.Location = new System.Drawing.Point(172, 322);
+            this.TextBox4.Location = new System.Drawing.Point(172, 353);
             this.TextBox4.Name = "TextBox4";
             this.TextBox4.Size = new System.Drawing.Size(492, 25);
             this.TextBox4.TabIndex = 8;
@@ -279,7 +281,7 @@ namespace ATISPlugin
             // Label5
             // 
             this.Label5.AutoSize = true;
-            this.Label5.Location = new System.Drawing.Point(6, 356);
+            this.Label5.Location = new System.Drawing.Point(6, 387);
             this.Label5.MinimumSize = new System.Drawing.Size(160, 17);
             this.Label5.Name = "Label5";
             this.Label5.Size = new System.Drawing.Size(160, 17);
@@ -290,7 +292,7 @@ namespace ATISPlugin
             // Label6
             // 
             this.Label6.AutoSize = true;
-            this.Label6.Location = new System.Drawing.Point(6, 387);
+            this.Label6.Location = new System.Drawing.Point(6, 418);
             this.Label6.MinimumSize = new System.Drawing.Size(160, 17);
             this.Label6.Name = "Label6";
             this.Label6.Size = new System.Drawing.Size(160, 17);
@@ -301,7 +303,7 @@ namespace ATISPlugin
             // Label7
             // 
             this.Label7.AutoSize = true;
-            this.Label7.Location = new System.Drawing.Point(6, 418);
+            this.Label7.Location = new System.Drawing.Point(6, 449);
             this.Label7.MinimumSize = new System.Drawing.Size(160, 17);
             this.Label7.Name = "Label7";
             this.Label7.Size = new System.Drawing.Size(160, 17);
@@ -312,7 +314,7 @@ namespace ATISPlugin
             // Label8
             // 
             this.Label8.AutoSize = true;
-            this.Label8.Location = new System.Drawing.Point(6, 449);
+            this.Label8.Location = new System.Drawing.Point(6, 480);
             this.Label8.MinimumSize = new System.Drawing.Size(160, 17);
             this.Label8.Name = "Label8";
             this.Label8.Size = new System.Drawing.Size(160, 17);
@@ -323,7 +325,7 @@ namespace ATISPlugin
             // Label10
             // 
             this.Label10.AutoSize = true;
-            this.Label10.Location = new System.Drawing.Point(6, 511);
+            this.Label10.Location = new System.Drawing.Point(6, 542);
             this.Label10.MinimumSize = new System.Drawing.Size(160, 17);
             this.Label10.Name = "Label10";
             this.Label10.Size = new System.Drawing.Size(160, 17);
@@ -334,7 +336,7 @@ namespace ATISPlugin
             // Label9
             // 
             this.Label9.AutoSize = true;
-            this.Label9.Location = new System.Drawing.Point(6, 480);
+            this.Label9.Location = new System.Drawing.Point(6, 511);
             this.Label9.MinimumSize = new System.Drawing.Size(160, 17);
             this.Label9.Name = "Label9";
             this.Label9.Size = new System.Drawing.Size(160, 17);
@@ -345,7 +347,7 @@ namespace ATISPlugin
             // Label11
             // 
             this.Label11.AutoSize = true;
-            this.Label11.Location = new System.Drawing.Point(8, 542);
+            this.Label11.Location = new System.Drawing.Point(8, 573);
             this.Label11.MinimumSize = new System.Drawing.Size(160, 17);
             this.Label11.Name = "Label11";
             this.Label11.Size = new System.Drawing.Size(160, 17);
@@ -356,7 +358,7 @@ namespace ATISPlugin
             // Label12
             // 
             this.Label12.AutoSize = true;
-            this.Label12.Location = new System.Drawing.Point(8, 572);
+            this.Label12.Location = new System.Drawing.Point(8, 603);
             this.Label12.MinimumSize = new System.Drawing.Size(160, 17);
             this.Label12.Name = "Label12";
             this.Label12.Size = new System.Drawing.Size(160, 17);
@@ -367,7 +369,7 @@ namespace ATISPlugin
             // labelTimeCheck
             // 
             this.LabelTimeCheck.AutoSize = true;
-            this.LabelTimeCheck.Location = new System.Drawing.Point(78, 604);
+            this.LabelTimeCheck.Location = new System.Drawing.Point(78, 635);
             this.LabelTimeCheck.Name = "labelTimeCheck";
             this.LabelTimeCheck.Size = new System.Drawing.Size(88, 17);
             this.LabelTimeCheck.TabIndex = 32;
@@ -392,6 +394,27 @@ namespace ATISPlugin
             this.ButtonNext.UseVisualStyleBackColor = true;
             this.ButtonNext.Click += new System.EventHandler(this.ButtonNext_Click);
             // 
+            // LabelMode
+            // 
+            this.LabelMode.AutoSize = true;
+            this.LabelMode.Location = new System.Drawing.Point(8, 232);
+            this.LabelMode.MinimumSize = new System.Drawing.Size(160, 17);
+            this.LabelMode.Name = "LabelMode";
+            this.LabelMode.Size = new System.Drawing.Size(160, 17);
+            this.LabelMode.TabIndex = 61;
+            this.LabelMode.Text = "MODE";
+            this.LabelMode.TextAlign = System.Drawing.ContentAlignment.TopRight;
+            // 
+            // TextBoxMode
+            // 
+            this.TextBoxMode.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
+            this.TextBoxMode.Location = new System.Drawing.Point(172, 229);
+            this.TextBoxMode.Name = "TextBoxMode";
+            this.TextBoxMode.ReadOnly = true;
+            this.TextBoxMode.Size = new System.Drawing.Size(462, 25);
+            this.TextBoxMode.TabIndex = 62;
+            this.TextBoxMode.MouseUp += new System.Windows.Forms.MouseEventHandler(this.TextBoxMode_MouseUp);
+            // 
             // labelATIS
             // 
             this.LabelATIS.AutoSize = true;
@@ -414,7 +437,7 @@ namespace ATISPlugin
             // 
             // ButtonSave
             // 
-            this.ButtonSave.Location = new System.Drawing.Point(172, 631);
+            this.ButtonSave.Location = new System.Drawing.Point(172, 662);
             this.ButtonSave.Name = "ButtonSave";
             this.ButtonSave.Size = new System.Drawing.Size(245, 28);
             this.ButtonSave.TabIndex = 18;
@@ -424,7 +447,7 @@ namespace ATISPlugin
             // 
             // ButtonCancel
             // 
-            this.ButtonCancel.Location = new System.Drawing.Point(423, 631);
+            this.ButtonCancel.Location = new System.Drawing.Point(423, 662);
             this.ButtonCancel.Name = "ButtonCancel";
             this.ButtonCancel.Size = new System.Drawing.Size(241, 28);
             this.ButtonCancel.TabIndex = 19;
@@ -548,7 +571,7 @@ namespace ATISPlugin
             // TextBoxZulu
             // 
             this.TextBoxZulu.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper;
-            this.TextBoxZulu.Location = new System.Drawing.Point(172, 230);
+            this.TextBoxZulu.Location = new System.Drawing.Point(172, 261);
             this.TextBoxZulu.Multiline = true;
             this.TextBoxZulu.Name = "TextBoxZulu";
             this.TextBoxZulu.Size = new System.Drawing.Size(492, 365);
@@ -569,7 +592,7 @@ namespace ATISPlugin
             // 
             // ComboBoxZuluFrequency
             // 
-            this.ComboBoxZuluFrequency.Location = new System.Drawing.Point(172, 600);
+            this.ComboBoxZuluFrequency.Location = new System.Drawing.Point(172, 631);
             this.ComboBoxZuluFrequency.Name = "ComboBoxZuluFrequency";
             this.ComboBoxZuluFrequency.Size = new System.Drawing.Size(492, 25);
             this.ComboBoxZuluFrequency.TabIndex = 54;
@@ -578,7 +601,7 @@ namespace ATISPlugin
             // LabelFrequency
             // 
             this.LabelFrequency.AutoSize = true;
-            this.LabelFrequency.Location = new System.Drawing.Point(86, 604);
+            this.LabelFrequency.Location = new System.Drawing.Point(86, 635);
             this.LabelFrequency.Name = "LabelFrequency";
             this.LabelFrequency.Size = new System.Drawing.Size(80, 17);
             this.LabelFrequency.TabIndex = 55;
@@ -588,7 +611,7 @@ namespace ATISPlugin
             // label13
             // 
             this.LabelWindCalculator.AutoSize = true;
-            this.LabelWindCalculator.Location = new System.Drawing.Point(6, 684);
+            this.LabelWindCalculator.Location = new System.Drawing.Point(6, 715);
             this.LabelWindCalculator.MinimumSize = new System.Drawing.Size(160, 17);
             this.LabelWindCalculator.Name = "label13";
             this.LabelWindCalculator.Size = new System.Drawing.Size(160, 25);
@@ -598,7 +621,7 @@ namespace ATISPlugin
             // 
             // ComboBoxRunway
             // 
-            this.ComboBoxRunway.Location = new System.Drawing.Point(172, 681);
+            this.ComboBoxRunway.Location = new System.Drawing.Point(172, 712);
             this.ComboBoxRunway.Name = "ComboBoxRunway";
             this.ComboBoxRunway.Size = new System.Drawing.Size(160, 25);
             this.ComboBoxRunway.TabIndex = 57;
@@ -607,7 +630,7 @@ namespace ATISPlugin
             // LabelWindComponents
             // 
             this.LabelWindComponents.AutoSize = true;
-            this.LabelWindComponents.Location = new System.Drawing.Point(338, 684);
+            this.LabelWindComponents.Location = new System.Drawing.Point(338, 715);
             this.LabelWindComponents.MinimumSize = new System.Drawing.Size(320, 0);
             this.LabelWindComponents.Name = "LabelWindComponents";
             this.LabelWindComponents.Size = new System.Drawing.Size(320, 17);
@@ -629,7 +652,9 @@ namespace ATISPlugin
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 17F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AutoValidate = System.Windows.Forms.AutoValidate.Disable;
-            this.ClientSize = new System.Drawing.Size(676, 722);
+            this.ClientSize = new System.Drawing.Size(676, 753);
+            this.Controls.Add(this.TextBoxMode);
+            this.Controls.Add(this.LabelMode);
             this.Controls.Add(this.ButtonRecord);
             this.Controls.Add(this.LabelWindComponents);
             this.Controls.Add(this.ComboBoxRunway);
@@ -756,5 +781,7 @@ namespace ATISPlugin
         private DropDownBox ComboBoxRunway;
         private Label LabelWindComponents;
         private ToggleButton ButtonRecord;
+        private Label LabelMode;
+        private TextField TextBoxMode;
     }
 }

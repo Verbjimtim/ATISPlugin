@@ -25,10 +25,15 @@ namespace ATISPlugin
         public string Name => "ATIS Editor";
         public static string DisplayName => "ATIS Editor";
 
-        private static readonly string ZuluUrl = "https://raw.githubusercontent.com/badvectors/ATISPlugin/master/Zulu.json";
-        private static readonly string CodesUrl = "https://raw.githubusercontent.com/badvectors/ATISPlugin/master/Codes.json";
-        private static readonly string PresetsUrl = "https://raw.githubusercontent.com/badvectors/ATISPlugin/master/Presets.json";
-        private static readonly string OFCWUrl = "https://raw.githubusercontent.com/badvectors/ATISPlugin/master/OFCW.json";
+        private static readonly string RepositoryUrl = "https://raw.githubusercontent.com/badvectors/ATISPlugin/master";
+
+        // Config files live in the profile's Plugins\Configs folder, prefixed ATIS there (e.g. ATISZulu.json) to
+        // tell them apart from other plugins' configs. The repository copies, under these names, are only a
+        // fallback for profiles that don't have them yet.
+        private const string ZuluFile = "Zulu.json";
+        private const string CodesFile = "Codes.json";
+        private const string PresetsFile = "ATISPresets.xml";
+        private const string OFCWFile = "OFCW.json";
 
         private static readonly HttpClient Client = new HttpClient();
 
@@ -43,6 +48,7 @@ namespace ATISPlugin
 
         public static readonly string ManualVoiceName = "Manual Recording";
         public static string DatasetPath => VatSysDatasetPath;
+        public static string ConfigsPath => DatasetPath == null ? null : Path.Combine(DatasetPath, "Plugins", "Configs");
 
         private static string vatSysDatasetPath;
         private static bool vatSysDatasetPathChecked;
@@ -84,13 +90,14 @@ namespace ATISPlugin
         }
 
         public static ATIS ATISData { get; set; }
+        public static ATISPresets Presets { get; set; } = new ATISPresets();
         public static List<ZuluInfo> ZuluInfo { get; set; } = new List<ZuluInfo>();
         public static List<OFCWInfo> OFCWInfo { get; set; } = new List<OFCWInfo>();
         public static List<CodeBlock> CodeBlocks { get; set; } = new List<CodeBlock>();
-        public static List<PresetOption> PresetOptions { get; set; } = new List<PresetOption>();
 
         public static SoundPlayer SoundPlayer { get; set; } = new SoundPlayer();
         private static Timer BroadcastTimer { get; set; } = new Timer();
+        private static Timer TimedUpdatesTimer { get; set; } = new Timer();
         public static ConcurrentQueue<ATISAudio> ToBroadcast { get; } = new ConcurrentQueue<ATISAudio>();
 
         // vatSys encodes bot audio with a single shared Opus encoder that is not
@@ -103,7 +110,7 @@ namespace ATISPlugin
         public Plugin()
         {
             // Stay inactive on profiles without an ATIS.xml in their dataset.
-            if (!File.Exists(Path.Combine(DatasetPath, "ATIS.xml"))) return;
+            if (DatasetPath == null || !File.Exists(Path.Combine(DatasetPath, "ATIS.xml"))) return;
 
             vatsys.ATIS.Disable();
 
@@ -142,6 +149,14 @@ namespace ATISPlugin
                 BroadcastTimer.Interval = TimeSpan.FromSeconds(5).TotalMilliseconds;
                 BroadcastTimer.AutoReset = false;
                 BroadcastTimer.Start();
+
+                TimedUpdatesTimer.Elapsed += new ElapsedEventHandler(TimedUpdatesTimer_Elapsed);
+                TimedUpdatesTimer.Interval = UntilNextMinute();
+                TimedUpdatesTimer.AutoReset = false;
+                TimedUpdatesTimer.Start();
+
+                // Only once the ATIS exist to take the METARs.
+                MET.Instance.ProductsChanged += METARChanged;
             }
             catch (Exception ex)
             {
@@ -155,44 +170,106 @@ namespace ATISPlugin
 
             _ = GetCodeBlocks();
 
-            _ = GetPresetOptions();
-
-            MET.Instance.ProductsChanged += METARChanged;
+            _ = GetPresets();
         }
 
+        private static IEnumerable<ATISControl> AllATIS => new[] { ATIS1, ATIS2, ATIS3, ATIS4 }.Where(x => x != null);
+
+        // Handled on the GUI thread, like the timed updates, as it changes the suggestions and can open the editor.
         private void METARChanged(object sender, MET.ProductsChangedEventArgs e)
         {
-            var products = MET.Instance.GetProducts(e.ProductRequest);
-            
-            if (products == null || products.Count == 0) return;
-            
-            var metar = products[0];
-
-            if (metar.Type != MET.ProductType.VATSIM_METAR || metar.Text == "No product available.") return;
-
-            var atis = GetATIS(metar.Icao);
-
-            if (atis == null) return;
-
-            var updated = atis.UpdateMetar(metar.Text);
-
-            OnMETARUpdate(atis.Number, updated);
+            try
+            {
+                MMI.InvokeOnGUI(delegate () { UpdateMetar(e); });
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not update ATIS from METAR: {ex.Message}"), DisplayName);
+            }
         }
 
-        private ATISControl GetATIS(string icao)
+        private void UpdateMetar(MET.ProductsChangedEventArgs e)
         {
-            if (ATIS1.ICAO == icao) return ATIS1;
-            if (ATIS2.ICAO == icao) return ATIS2;
-            if (ATIS3.ICAO == icao) return ATIS3;
-            if (ATIS4.ICAO == icao) return ATIS4;
-            return null;
+            try
+            {
+                var products = MET.Instance.GetProducts(e.ProductRequest);
+
+                if (products == null || products.Count == 0) return;
+
+                var metar = products[0];
+
+                if (metar.Type != MET.ProductType.VATSIM_METAR || metar.Text == "No product available.") return;
+
+                var atis = GetATIS(metar.Icao);
+
+                if (atis == null) return;
+
+                var updated = atis.UpdateMetar(metar.Text);
+
+                OnMETARUpdate(atis.Number, updated);
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not update ATIS from METAR: {ex.Message}"), DisplayName);
+            }
+        }
+
+        private ATISControl GetATIS(string icao) => AllATIS.FirstOrDefault(x => x.ICAO == icao);
+
+        // Reads a config file from the profile. If the profile doesn't have it, it's downloaded from the
+        // repository and saved there. A file already in the profile is always used as is.
+        private static async Task<string> GetConfigFile(string fileName)
+        {
+            var profileFileName = fileName.StartsWith("ATIS") ? fileName : "ATIS" + fileName;
+
+            var path = ConfigsPath == null ? null : Path.Combine(ConfigsPath, profileFileName);
+
+            if (path != null && File.Exists(path)) return File.ReadAllText(path);
+
+            var content = await Client.GetStringAsync($"{RepositoryUrl}/{fileName}");
+
+            try
+            {
+                // Only save into a profile that exists, rather than creating one.
+                if (path != null && Directory.Exists(DatasetPath))
+                {
+                    Directory.CreateDirectory(ConfigsPath);
+
+                    File.WriteAllText(path, content);
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not save {profileFileName} to the profile: {ex.Message}"), DisplayName);
+            }
+
+            return content;
+        }
+
+        private static async Task GetPresets()
+        {
+            try
+            {
+                var content = await GetConfigFile(PresetsFile);
+
+                var serializer = new XmlSerializer(typeof(ATISPresets));
+
+                using (var reader = new StringReader(content))
+                {
+                    Presets = (ATISPresets)serializer.Deserialize(reader) ?? new ATISPresets();
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not load ATIS presets: {ex.InnerException?.Message ?? ex.Message}"), DisplayName);
+            }
         }
 
         private static async Task GetCodeBlocks()
         {
             try
             {
-                var response = await Client.GetStringAsync(CodesUrl);
+                var response = await GetConfigFile(CodesFile);
 
                 var codeBlocks = JsonConvert.DeserializeObject<CodeBlock[]>(response);
 
@@ -207,30 +284,12 @@ namespace ATISPlugin
             }
         }
 
-        private static async Task GetPresetOptions()
-        {
-            try
-            {
-                var response = await Client.GetStringAsync(PresetsUrl);
-
-                var presetOptions = JsonConvert.DeserializeObject<PresetOption[]>(response);
-
-                foreach (var presetOption in presetOptions)
-                {
-                    PresetOptions.Add(presetOption);
-                }
-            }
-            catch (Exception ex)
-            {
-                Errors.Add(new Exception(ex.Message), DisplayName);
-            }
-        }
 
         private static async Task GetZuluInfo()
         {
             try
             {
-                var response = await Client.GetStringAsync(ZuluUrl);
+                var response = await GetConfigFile(ZuluFile);
 
                 var zuluInfo = JsonConvert.DeserializeObject<ZuluInfo[]>(response);
 
@@ -249,7 +308,7 @@ namespace ATISPlugin
         {
             try
             {
-                var response = await Client.GetStringAsync(OFCWUrl);
+                var response = await GetConfigFile(OFCWFile);
 
                 var ofcwInfo = JsonConvert.DeserializeObject<OFCWInfo[]>(response);
 
@@ -273,39 +332,100 @@ namespace ATISPlugin
             BroadcastTimer.Start();
         }
 
+        // An exception escaping an async void handler would take vatSys down, so it catches everything.
         private async void BroadcastTimer_Elasped(object sender, ElapsedEventArgs e)
         {
-            // BroadcastNow can fire this handler while an earlier one is still
-            // uploading, so wait for it to finish rather than running alongside it.
-            await BroadcastLock.WaitAsync();
-
             try
             {
-                while (ToBroadcast.TryDequeue(out var atb))
+                // BroadcastNow can fire this handler while an earlier one is still
+                // uploading, so wait for it to finish rather than running alongside it.
+                await BroadcastLock.WaitAsync();
+
+                try
                 {
-                    if (!Network.IsOfficialServer) continue;
-
-                    if (!Network.GetATISConnected(atb.ATISIndex)) continue;
-
-                    try
+                    while (ToBroadcast.TryDequeue(out var atb))
                     {
-                        await StartVoiceATIS(atb);
-                    }
-                    catch (Exception ex)
-                    {
-                        Errors.Add(new Exception($"Could not start voice ATIS: {ex.Message}"), DisplayName);
+                        if (!Network.IsOfficialServer) continue;
+
+                        if (!Network.GetATISConnected(atb.ATISIndex)) continue;
+
+                        try
+                        {
+                            await StartVoiceATIS(atb);
+                        }
+                        catch (Exception ex)
+                        {
+                            Errors.Add(new Exception($"Could not start voice ATIS: {ex.Message}"), DisplayName);
+                        }
                     }
                 }
+                finally
+                {
+                    BroadcastLock.Release();
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not broadcast ATIS: {ex.Message}"), DisplayName);
             }
             finally
             {
-                BroadcastLock.Release();
+                if (!Disposed)
+                {
+                    // Audio queued while this handler was finishing must not wait for the slow poll.
+                    BroadcastTimer.Interval = ToBroadcast.IsEmpty ? TimeSpan.FromSeconds(5).TotalMilliseconds : 250;
+
+                    BroadcastTimer.Start();
+                }
             }
+        }
 
-            // Audio queued while this handler was finishing must not wait for the slow poll.
-            BroadcastTimer.Interval = ToBroadcast.IsEmpty ? TimeSpan.FromSeconds(5).TotalMilliseconds : 250;
+        // SFC COND clearing, windshear expiry and OPR INFO FM times are time based, so check them at the start of
+        // every minute (an FM time alerts as that minute begins). The timer runs on a background thread, so the
+        // check is done on the GUI thread, which owns the editor and the suggestions.
+        private void TimedUpdatesTimer_Elapsed(object sender, ElapsedEventArgs e)
+        {
+            try
+            {
+                MMI.InvokeOnGUI(delegate () { CheckTimedUpdates(); });
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not check ATIS timed updates: {ex.Message}"), DisplayName);
+            }
+            finally
+            {
+                if (!Disposed)
+                {
+                    TimedUpdatesTimer.Interval = UntilNextMinute();
+                    TimedUpdatesTimer.Start();
+                }
+            }
+        }
 
-            BroadcastTimer.Start();
+        // Just past the next minute, as a timer can fire a little early.
+        private static double UntilNextMinute()
+        {
+            var now = DateTime.UtcNow;
+
+            var next = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0, DateTimeKind.Utc).AddMinutes(1);
+
+            return (next - now).TotalMilliseconds + 250;
+        }
+
+        private void CheckTimedUpdates()
+        {
+            try
+            {
+                foreach (var atis in AllATIS)
+                {
+                    if (atis.CheckTimedUpdates(DateTime.UtcNow)) OnMETARUpdate(atis.Number, true);
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not check ATIS timed updates: {ex.Message}"), DisplayName);
+            }
         }
 
         private static async Task StartVoiceATIS(ATISAudio atb)
@@ -359,44 +479,104 @@ namespace ATISPlugin
             }
         }
 
+        // Raised off the GUI thread, but the editor reads Frequencies there, so it's rebuilt on the GUI thread.
         private void Audio_VSCSFrequenciesChanged(object sender, EventArgs e)
         {
-            Frequencies.Clear();
-
-            var frequenciesUpdate = false;
-
-            foreach (var frequency in Audio.VSCSFrequencies)
+            try
             {
-                if (!frequency.Transmit) continue;
-
-                frequenciesUpdate = true;
-
-                Frequencies.Add(frequency);
+                MMI.InvokeOnGUI(delegate () { UpdateFrequencies(); });
             }
-
-            if (!IsEditorOpen()) return;
-
-            if (Editor != null && !Editor.IsDisposed && frequenciesUpdate)
+            catch (Exception ex)
             {
-                Editor?.RefreshEvent.Invoke(this, null);
+                Errors.Add(new Exception($"Could not update the ATIS frequencies: {ex.Message}"), DisplayName);
             }
         }
 
-        private async void Network_Disconnected(object sender, EventArgs e)
+        private void UpdateFrequencies()
+        {
+            try
+            {
+                Frequencies.Clear();
+
+                var frequenciesUpdate = false;
+
+                foreach (var frequency in Audio.VSCSFrequencies)
+                {
+                    if (!frequency.Transmit) continue;
+
+                    frequenciesUpdate = true;
+
+                    Frequencies.Add(frequency);
+                }
+
+                if (!IsEditorOpen()) return;
+
+                if (Editor != null && !Editor.IsDisposed && frequenciesUpdate)
+                {
+                    Editor?.RefreshEvent.Invoke(this, null);
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not update the ATIS frequencies: {ex.Message}"), DisplayName);
+            }
+        }
+
+        // Raised on vatSys's network thread, while the editor may be reading the ATIS lines on the GUI thread, so
+        // they're reset there. An exception escaping the delegate would take vatSys down, so it's reported instead.
+        private void Network_Disconnected(object sender, EventArgs e)
+        {
+            try
+            {
+                MMI.InvokeOnGUI(async delegate ()
+                {
+                    try
+                    {
+                        await DeleteAll();
+                    }
+                    catch (Exception ex)
+                    {
+                        Errors.Add(new Exception($"Could not delete the ATIS: {ex.Message}"), DisplayName);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not delete the ATIS: {ex.Message}"), DisplayName);
+            }
+        }
+
+        // Each ATIS is deleted on its own, so one failing doesn't leave the others connected.
+        private static async Task DeleteAll()
         {
             while (ToBroadcast.TryDequeue(out _)) { }
-            
-            await ATIS1?.Delete();
-            await ATIS2?.Delete();
-            await ATIS3?.Delete();
-            await ATIS4?.Delete();
+
+            foreach (var atis in AllATIS.ToList())
+            {
+                try
+                {
+                    await atis.Delete();
+                }
+                catch (Exception ex)
+                {
+                    Errors.Add(new Exception($"Could not delete ATIS {atis.Number}: {ex.Message}"), DisplayName);
+                }
+            }
         }
 
+        // Raised by the network and by each ATIS, where an exception would take vatSys down, so it's reported instead.
         private void OnUpdate(object sender, EventArgs e)
         {
-            if (!IsEditorOpen()) return;
+            try
+            {
+                if (!IsEditorOpen()) return;
 
-            Editor?.RefreshEvent.Invoke(this, null);
+                Editor?.RefreshEvent.Invoke(this, null);
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not refresh the ATIS editor: {ex.Message}"), DisplayName);
+            }
         }
 
         private static void PlayUpdateSound()
@@ -461,7 +641,14 @@ namespace ATISPlugin
 
         private void ATISMenu_Click(object sender, EventArgs e)
         {
-            ShowEditorWindow();
+            try
+            {
+                ShowEditorWindow();
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not open the ATIS editor: {ex.Message}"), DisplayName);
+            }
         }
 
         private static bool IsEditorOpen() => Editor != null && !Editor.IsDisposed && Editor.Visible;
@@ -506,9 +693,25 @@ namespace ATISPlugin
             return;
         }
 
+        private static bool Disposed { get; set; }
+
         public void Dispose()
         {
-            Network_Disconnected(this, null);
+            Disposed = true;
+
+            try
+            {
+                MET.Instance.ProductsChanged -= METARChanged;
+
+                BroadcastTimer.Stop();
+                BroadcastTimer.Dispose();
+
+                TimedUpdatesTimer.Stop();
+                TimedUpdatesTimer.Dispose();
+            }
+            catch { }
+
+            _ = DeleteAll();
         }
     }
 }
