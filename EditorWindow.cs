@@ -2188,6 +2188,8 @@ namespace ATISPlugin
 
                     textBox.Text = PresetAirport.Clean(field.Value);
                 }
+
+                ClearUnofferedFields(mode);
             }
 
             // The mode may have replaced a field holding an addition, or be a condition for one.
@@ -2197,6 +2199,32 @@ namespace ATISPlugin
             ButtonCancel.Enabled = true;
 
             RefreshForm_Presets();
+        }
+
+        // A mode that doesn't set a single choice field (e.g. a single runway mode, which only sets RWY) blanks it
+        // when its wording isn't offered in the new mode, so an IVA APCH from a PROPS mode isn't left behind.
+        // Only where the airport lists that field's presets for the new mode, as otherwise its choices aren't known.
+        // Fields where several presets can be ticked, or whose presets are templates, are left as they are.
+        private void ClearUnofferedFields(PresetMode mode)
+        {
+            foreach (var line in Control.Lines)
+            {
+                if (line.Name == SurfaceCondition.Field || mode.Fields.Any(x => x.Name == line.Name)) continue;
+
+                if (!PresetAirport.ListsPresetsFor(line.Name, mode.Name) || IsMultiple(line.Name)) continue;
+
+                var textBox = GetTextBox(line.Number);
+
+                if (textBox == null || string.IsNullOrWhiteSpace(textBox.Text)) continue;
+
+                var options = GetOptions(line);
+
+                if (!options.Contains(string.Empty) || options.Any(Template.IsTemplate)) continue;
+
+                if (options.Contains(PresetAirport.Clean(textBox.Text))) continue;
+
+                textBox.Text = string.Empty;
+            }
         }
 
         private void ComboBoxVoice_SelectedIndexChanged(object sender, EventArgs e) => Safely("change the voice", () =>
