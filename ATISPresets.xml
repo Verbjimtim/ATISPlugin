@@ -167,7 +167,7 @@
       <Preset>INDEP PARL DEPS IN PROG</Preset>
     </Presets>
     <!-- Single arrival runway: visual (blank) or instrument approach. -->
-    <Presets Field="APCH" Modes="SODPROPS,RWY 07,RWY 25,16D/07A,16D/25A,CURFEW (AEST),CURFEW (AEDT)">
+    <Presets Field="APCH" Modes="SODPROPS,RWY 07,RWY 25,RWY 16L,RWY 16R,RWY 34L,RWY 34R,16D/07A,16D/25A,CURFEW (AEST),CURFEW (AEDT)">
       <Preset />
       <Preset>EXP INSTR APCH</Preset>
     </Presets>
@@ -383,10 +383,13 @@
     <!-- Permitted between 2300 and 0530 local when YSSY curfew is in use: arrivals 05, departures 23. -->
     <Mode Name="RRO" Hours="2300-0530" Runways="05,23">
       <Field Name="APCH">EXP INST APCH</Field>
-      <Field Name="RWY">RECIPROCAL RWY OPS IN PROGRESS</Field>
+      <Field Name="RWY">05 FOR ARR. RWY 23 FOR DEP</Field>
     </Mode>
     <Presets Field="APCH">
       <Preset>EXP INST APCH</Preset>
+    </Presets>
+    <Presets Field="OPR INFO" Multiple="true" Modes="RRO">
+      <Preset>RECIPROCAL RWY OPS IN PROGRESS</Preset>
     </Presets>
     <Presets Field="OPR INFO" Multiple="true">
       <Preset>SY CTA C10 SOUTH OF WS CTR ACTIVE</Preset>

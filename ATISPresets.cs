@@ -167,6 +167,11 @@ namespace ATISPlugin
 
         public bool IsMultiple(string fieldName) => Fields.Any(x => x.Field == fieldName && x.Multiple);
 
+        // Whether a preset group for the field names the mode in its Modes list, so the field's choices in that
+        // mode were picked on purpose rather than left to the airport's general presets.
+        public bool ListsPresetsFor(string fieldName, string modeName) => Fields.Any(x => x.Field == fieldName
+            && !string.IsNullOrWhiteSpace(x.Modes) && x.Modes.Split(',').Any(m => m.Trim() == modeName));
+
         // Whether the airport lists any values for the field, as presets or in a mode (an empty value counts).
         public bool DefinesField(string fieldName) =>
             Fields.Any(x => x.Field == fieldName) || Modes.Any(x => x.Fields.Any(f => f.Name == fieldName));
