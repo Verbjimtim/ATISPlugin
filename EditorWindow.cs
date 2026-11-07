@@ -1086,21 +1086,47 @@ namespace ATISPlugin
 
             ResumeLayout();
 
-            if (WindowChrome == null)
+            if (WindowChrome == null && WindowState != FormWindowState.Minimized)
             {
                 var chrome = Height - ClientSize.Height;
                 WindowChrome = chrome > 0 ? chrome : 28;
             }
 
-            var height = clientHeight + WindowChrome.Value;
+            PendingHeight = clientHeight + (WindowChrome ?? 28);
 
-            if (Height == height) return;
+            ApplyWindowSize();
+        }
+
+        // The window's width never changes, but it can be scaled up from the designed 680 at load
+        // (AutoScaleMode.Font), so it's taken from the window the first time it's laid out un-minimised.
+        private int? WindowWidth { get; set; }
+        private int? PendingHeight { get; set; }
+
+        // Locks the window to its width and the height the layout needs. While minimised the window's
+        // size is the caption bar's, so locking then would keep it that narrow once restored; the size is
+        // applied when it's restored instead.
+        private void ApplyWindowSize()
+        {
+            if (PendingHeight == null || WindowState == FormWindowState.Minimized) return;
+
+            if (WindowWidth == null) WindowWidth = Width >= 680 ? Width : 680;
+
+            var size = new System.Drawing.Size(WindowWidth.Value, PendingHeight.Value);
+
+            if (Size == size && MinimumSize == size && MaximumSize == size) return;
 
             MinimumSize = System.Drawing.Size.Empty;
             MaximumSize = System.Drawing.Size.Empty;
-            Height = height;
-            MinimumSize = new System.Drawing.Size(Width, height);
-            MaximumSize = new System.Drawing.Size(Width, height);
+            Size = size;
+            MinimumSize = size;
+            MaximumSize = size;
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+
+            if (IsHandleCreated && WindowState != FormWindowState.Minimized) BeginInvoke(new Action(ApplyWindowSize));
         }
 
         private Label GetLabel(int number)
