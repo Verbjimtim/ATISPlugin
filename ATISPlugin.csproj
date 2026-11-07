@@ -7,8 +7,8 @@
 		<ProgramFilesX86>$(MSBuildProgramFiles32)</ProgramFilesX86>
 		<OutputPath>C:\Users\ajdun\OneDrive\Documents\vatSys Files\Profiles\Australia\Plugins\ATIS Plugin</OutputPath>
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-		<AssemblyVersion>4.01</AssemblyVersion>
-		<FileVersion>4.01</FileVersion>
+		<AssemblyVersion>4.2</AssemblyVersion>
+		<FileVersion>4.2</FileVersion>
 	</PropertyGroup>
 
 	<ItemGroup>
