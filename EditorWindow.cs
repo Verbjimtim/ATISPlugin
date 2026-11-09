@@ -31,6 +31,8 @@ namespace ATISPlugin
         public int Number { get; private set; } = 1;
         private Dictionary<string, string> Saves { get; set; } = new Dictionary<string, string>();
         private string Mode { get; set; }
+        // The airport of the ATIS the window last showed, to notice when that ATIS has been deleted.
+        private string LoadedICAO { get; set; }
         private PresetAirport PresetAirport => ICAO == null ? null : Plugin.Presets.GetAirport(ICAO);
         private Dictionary<int, PresetButton> PresetButtons { get; set; } = new Dictionary<int, PresetButton>();
         private bool Edits => Saves.Any() || 
@@ -109,6 +111,8 @@ namespace ATISPlugin
                 Number = number;
 
                 ICAO = Control.ICAO;
+
+                LoadedICAO = Control.ICAO;
 
                 ID = Control.ID;
 
@@ -726,6 +730,17 @@ namespace ATISPlugin
 
                     return;
                 }
+
+                // The ATIS was deleted somewhere other than the Delete button (disconnecting, or changing
+                // position), so the window's own copy of its mode, letter and airport is reset the same way.
+                if (LoadedICAO != null && Control.ICAO == null)
+                {
+                    Change(Number);
+
+                    return;
+                }
+
+                LoadedICAO = Control.ICAO;
 
                 if (Profile.Name.Contains("VATNZ"))
                 {
