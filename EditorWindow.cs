@@ -884,32 +884,19 @@ namespace ATISPlugin
                 }
             }
 
-            // An empty APCH means visual approaches: an error with more than one arrival runway, and outside the
-            // limits when the cloud base or visibility doesn't allow them.
-            var approachError = false;
-
-            if (active && approachBox != null && string.IsNullOrWhiteSpace(approachBox.Text) && runwayBox != null)
+            // An empty APCH means visual approaches, outside the limits when the cloud base or visibility doesn't
+            // allow them. How many runways are in use doesn't matter.
+            if (active && approachBox != null && string.IsNullOrWhiteSpace(approachBox.Text) && runwayBox != null
+                && Wind.ArrivalRunways(runwayBox.Text).Any())
             {
-                var arrivals = Wind.ArrivalRunways(runwayBox.Text);
+                var visualCeiling = PresetAirport?.VisualCeiling ?? PresetAirport.DefaultVisualCeiling;
 
-                if (arrivals.Count > 1 && !(PresetAirport?.ParallelVisual ?? false))
-                {
-                    approachError = true;
-                }
-                else if (arrivals.Any())
-                {
-                    var visualCeiling = PresetAirport?.VisualCeiling ?? PresetAirport.DefaultVisualCeiling;
-
-                    approachOutside = conditions.Ceiling < visualCeiling || conditions.Visibility <= PresetAirport.VisualVisibility;
-                }
+                approachOutside = conditions.Ceiling < visualCeiling || conditions.Visibility <= PresetAirport.VisualVisibility;
             }
 
             SetHighlight(runwayLine, runwayOutside, OutsideLimitsColour);
-            SetHighlight(approachLine, approachOutside || approachError, approachError ? ErrorColour : OutsideLimitsColour);
+            SetHighlight(approachLine, approachOutside, OutsideLimitsColour);
         }
-
-        // The profile's emergency red, for an ATIS that has to be wrong.
-        private static System.Drawing.Color ErrorColour => Colours.GetColour(Colours.Identities.Emergency);
 
         // The profile's VSCS active frequency green.
         private static System.Drawing.Color RunwayChangeColour => Colours.GetColour(Colours.Identities.VSCSActiveFrequency);
