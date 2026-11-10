@@ -48,7 +48,6 @@ namespace ATISPlugin
         private PromptBuilder ATISSpoken { get; set; }
         private SpeechAudioFormatInfo SpeechFormat { get; set; }
         public string METARRaw { get; set; }
-        public string METARLastRaw { get; set; }
         private WaveFormat WaveForm { get; set; } = new WaveFormat(48000, 1);
         public PromptRate PromptRate { get; set; } = PromptRate.Medium;
         public InstalledVoice InstalledVoice => SpeechSynth.GetInstalledVoices().FirstOrDefault(x => x.VoiceInfo.Name == VoiceName);
@@ -258,7 +257,6 @@ namespace ATISPlugin
             ZuluContact = null;
             ZuluContactsGiven.Clear();
 
-            METARLastRaw = null;
             METARRaw = null;
 
             foreach (var line in Lines)
@@ -501,9 +499,9 @@ namespace ATISPlugin
 
         public void SuggestionsCancel()
         {
-            // Forget the METAR whose suggestions are being dropped, so they're suggested again the next time it arrives.
-            if (SuggestedLines.Any(x => x.METARField != METARField.None)) METARRaw = METARLastRaw;
-
+            // The cancelled METAR stays the last one seen. vatSys sends the same METAR again every minute or so, and
+            // forgetting it suggested the same changes (and played the update sound) each time. A new METAR is
+            // still suggested against the ATIS as it stands, and Load METAR applies the current one again.
             SuggestedLines.Clear();
 
             SuggestedMode = null;
@@ -523,8 +521,6 @@ namespace ATISPlugin
             if (metar == METARRaw && !force) return false;
 
             if (IsZulu && !string.IsNullOrWhiteSpace(METARRaw)) return false;
-
-            if (metar != METARRaw) METARLastRaw = METARRaw;
 
             METARRaw = metar;
 
