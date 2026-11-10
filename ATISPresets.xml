@@ -434,6 +434,18 @@
     </Presets>
   </Airport>
 
+  <!-- Military aerodromes state visual approaches on the ATIS instead of leaving APCH blank. Combined with each
+       airport's own entry, so Williamtown keeps its stereo approaches. -->
+  <Airport ICAO="YAMB,YCIN,YPDN,YMES,YPED,YGIG,YPLM,YSNW,YBOK,YPEA,YSRI,YBSG,YPTN,YBTL,YWLM">
+    <Presets Field="APCH">
+      <Preset>EXP VISUAL APCH</Preset>
+      <Preset>EXP INST APCH</Preset>
+      <Preset>EXP ILS APCH</Preset>
+      <Preset>EXP RNP APCH</Preset>
+      <Preset />
+    </Presets>
+  </Airport>
+
   <!-- ===================== Class D ===================== -->
   <!-- Metro class D: MX XW is reported from 5KT (ReportCrosswindFrom). PROPS modes are split by direction,
        with RWY giving that direction's runways from the SOP formats (which list both ends together). -->

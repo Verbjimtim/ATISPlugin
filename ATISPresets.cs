@@ -173,6 +173,9 @@ namespace ATISPlugin
         // APCH options for airports that don't define their own.
         public const string ApproachField = "APCH";
 
+        // How military aerodromes state visual approaches, checked against the visual minima like a blank APCH.
+        public const string VisualApproach = "EXP VISUAL APCH";
+
         public static readonly string[] DefaultApproaches = { "EXP INST APCH", "EXP ILS APCH", "EXP GLS APCH", "EXP RNP APCH" };
 
         public static string Clean(string value) => (value ?? string.Empty).Trim().TrimEnd('.').Trim().ToUpper();

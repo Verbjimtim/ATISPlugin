@@ -884,9 +884,12 @@ namespace ATISPlugin
                 }
             }
 
-            // An empty APCH means visual approaches, outside the limits when the cloud base or visibility doesn't
-            // allow them. How many runways are in use doesn't matter.
-            if (active && approachBox != null && string.IsNullOrWhiteSpace(approachBox.Text) && runwayBox != null
+            // An empty APCH (or EXP VISUAL APCH, used at military aerodromes) means visual approaches, outside the
+            // limits when the cloud base or visibility doesn't allow them. How many runways are in use doesn't matter.
+            var visual = string.IsNullOrWhiteSpace(approachBox?.Text)
+                || PresetAirport.Clean(approachBox.Text) == PresetAirport.Clean(PresetAirport.VisualApproach);
+
+            if (active && approachBox != null && visual && runwayBox != null
                 && Wind.ArrivalRunways(runwayBox.Text).Any())
             {
                 var visualCeiling = PresetAirport?.VisualCeiling ?? PresetAirport.DefaultVisualCeiling;
