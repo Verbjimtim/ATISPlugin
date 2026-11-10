@@ -108,34 +108,44 @@ namespace ATISPlugin
         {
             try
             {
-                Number = number;
-
-                ICAO = Control.ICAO;
-
-                LoadedICAO = Control.ICAO;
-
-                ID = Control.ID;
-
-                Mode = Control.Mode;
-
-                TimeCheck = Control.TimeCheck;
-
-                Rate = Control.PromptRate;
-
-                VoiceName = Control.VoiceName;
-
-                Saves.Clear();
-
-                LoadOptions();
-
-                RefreshForm_ClearWindCalculator();
-
-                RefreshForm();
+                using (PauseDrawing())
+                {
+                    ChangeNow(number);
+                }
             }
             catch (Exception ex)
             {
                 Errors.Add(new Exception($"Could not load ATIS {number}: {ex.Message}"), Plugin.DisplayName);
             }
+        }
+
+        private void ChangeNow(int number)
+        {
+            Number = number;
+
+            ICAO = Control.ICAO;
+
+            LoadedICAO = Control.ICAO;
+
+            ResetWindComponents();
+
+            ID = Control.ID;
+
+            Mode = Control.Mode;
+
+            TimeCheck = Control.TimeCheck;
+
+            Rate = Control.PromptRate;
+
+            VoiceName = Control.VoiceName;
+
+            Saves.Clear();
+
+            LoadOptions();
+
+            RefreshForm_ClearWindCalculator();
+
+            RefreshForm();
         }
 
         private void OnRefreshEvent(object sender, RefreshEventArgs e)
@@ -720,85 +730,152 @@ namespace ATISPlugin
 
         public void RefreshForm()
         {
-            Invoke(new Action(() => {
-
-                if (!Initialized) return;
-
-                if (Plugin.SingleATISOnly && Number != 1)
+            Invoke(new Action(() =>
+            {
+                using (PauseDrawing())
                 {
-                    Change(1);
-
-                    return;
+                    RefreshFormNow();
                 }
-
-                // The ATIS was deleted somewhere other than the Delete button (disconnecting, or changing
-                // position), so the window's own copy of its mode, letter and airport is reset the same way.
-                if (LoadedICAO != null && Control.ICAO == null)
-                {
-                    Change(Number);
-
-                    return;
-                }
-
-                LoadedICAO = Control.ICAO;
-
-                if (Profile.Name.Contains("VATNZ"))
-                {
-                    ButtonZulu.Visible = false;
-                }
-                else
-                {
-                    ButtonZulu.Visible = true;
-                }
-
-                if (ICAO == null)
-                {
-                    ComboBoxAirport.SelectedIndex = ComboBoxAirport.Items.IndexOf("");
-                }
-                else
-                {
-                    var index = ComboBoxAirport.Items.IndexOf(DisplayName);
-
-                    if (ComboBoxAirport.SelectedIndex != index) ComboBoxAirport.SelectedIndex = ComboBoxAirport.Items.IndexOf(DisplayName);
-                }
-
-                ComboBoxLetter.SelectedIndex = ComboBoxLetter.Items.IndexOf(ID.ToString());
-
-                SetText(TextBoxMode, Mode);
-
-                if (VoiceName != null)
-                {
-                    ComboBoxVoice.SelectedIndex = ComboBoxVoice.Items.IndexOf(VoiceName);
-                }
-
-                ComboBoxRate.SelectedIndex = ComboBoxRate.Items.IndexOf(Rate.ToString());
-
-                ComboBoxTimeCheck.SelectedIndex = ComboBoxTimeCheck.Items.IndexOf(TimeCheck.ToString());
-
-                LoadZuluFrequencies();
-
-                RefreshForm_TopButtons();
-
-                if (Network.IsConnected && Control?.ICAO == null)
-                {
-                    RefreshForm_ClearWindCalculator();
-                    RefreshFrom_NoATIS();
-                }
-                else if (Network.IsConnected && Control?.ICAO != null)
-                {
-                    RefreshForm_WithATIS();
-                }
-                else
-                {
-                    RefreshForm_ClearWindCalculator();
-                    RefreshForm_NotConnected();
-                }
-
-                RefreshForm_Presets();
-
-                AutoSelectMode();
-
             }));
+        }
+
+        private void RefreshFormNow()
+        {
+            if (!Initialized) return;
+
+            if (Plugin.SingleATISOnly && Number != 1)
+            {
+                Change(1);
+
+                return;
+            }
+
+            // The ATIS was deleted somewhere other than the Delete button (disconnecting, or changing
+            // position), so the window's own copy of its mode, letter and airport is reset the same way.
+            if (LoadedICAO != null && Control.ICAO == null)
+            {
+                Change(Number);
+
+                return;
+            }
+
+            LoadedICAO = Control.ICAO;
+
+            if (Profile.Name.Contains("VATNZ"))
+            {
+                ButtonZulu.Visible = false;
+            }
+            else
+            {
+                ButtonZulu.Visible = true;
+            }
+
+            if (ICAO == null)
+            {
+                ComboBoxAirport.SelectedIndex = ComboBoxAirport.Items.IndexOf("");
+            }
+            else
+            {
+                var index = ComboBoxAirport.Items.IndexOf(DisplayName);
+
+                if (ComboBoxAirport.SelectedIndex != index) ComboBoxAirport.SelectedIndex = ComboBoxAirport.Items.IndexOf(DisplayName);
+            }
+
+            ComboBoxLetter.SelectedIndex = ComboBoxLetter.Items.IndexOf(ID.ToString());
+
+            SetText(TextBoxMode, Mode);
+
+            if (VoiceName != null)
+            {
+                ComboBoxVoice.SelectedIndex = ComboBoxVoice.Items.IndexOf(VoiceName);
+            }
+
+            ComboBoxRate.SelectedIndex = ComboBoxRate.Items.IndexOf(Rate.ToString());
+
+            ComboBoxTimeCheck.SelectedIndex = ComboBoxTimeCheck.Items.IndexOf(TimeCheck.ToString());
+
+            LoadZuluFrequencies();
+
+            RefreshForm_TopButtons();
+
+            if (Network.IsConnected && Control?.ICAO == null)
+            {
+                RefreshForm_ClearWindCalculator();
+                RefreshFrom_NoATIS();
+            }
+            else if (Network.IsConnected && Control?.ICAO != null)
+            {
+                RefreshForm_WithATIS();
+            }
+            else
+            {
+                RefreshForm_ClearWindCalculator();
+                RefreshForm_NotConnected();
+            }
+
+            RefreshForm_Presets();
+
+            AutoSelectMode();
+        }
+
+        private int DrawingPaused { get; set; }
+
+        // Stops the window drawing until disposed, then draws it once. Switching ATIS changes dozens of controls
+        // (shown, hidden, moved, refilled and recoloured), and drawing after each change made switching lag.
+        // Nested pauses draw once, when the outermost ends.
+        private IDisposable PauseDrawing()
+        {
+            if (!IsHandleCreated) return new DrawingPause(null);
+
+            if (DrawingPaused++ == 0)
+            {
+                SuspendLayout();
+
+                NativeMethods.SendMessage(Handle, NativeMethods.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+            }
+
+            return new DrawingPause(() =>
+            {
+                if (--DrawingPaused > 0) return;
+
+                NativeMethods.SendMessage(Handle, NativeMethods.WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
+
+                ResumeLayout();
+
+                NativeMethods.RedrawWindow(Handle, IntPtr.Zero, IntPtr.Zero,
+                    NativeMethods.RDW_ERASE | NativeMethods.RDW_FRAME | NativeMethods.RDW_INVALIDATE | NativeMethods.RDW_ALLCHILDREN);
+            });
+        }
+
+        private sealed class DrawingPause : IDisposable
+        {
+            private Action OnDispose { get; set; }
+
+            public DrawingPause(Action onDispose) { OnDispose = onDispose; }
+
+            public void Dispose()
+            {
+                var action = OnDispose;
+
+                OnDispose = null;
+
+                action?.Invoke();
+            }
+        }
+
+        private static class NativeMethods
+        {
+            public const int WM_SETREDRAW = 0x000B;
+            public const uint RDW_INVALIDATE = 0x0001;
+            public const uint RDW_ERASE = 0x0004;
+            public const uint RDW_ALLCHILDREN = 0x0080;
+            public const uint RDW_FRAME = 0x0400;
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            public static extern bool RedrawWindow(IntPtr hWnd, IntPtr rect, IntPtr region, uint flags);
         }
 
         // Current weather for ranking runway modes: the METAR, plus SFC COND for a wet runway.
@@ -2692,11 +2769,31 @@ namespace ATISPlugin
             WindBaseLast = null;
             WindComponentsEditedByHand = false;
         }
+
         private double? GetRunwayHeading(string runwayName) => GetRunwayHeading(Control.ICAO, runwayName);
 
+        // Worked out once per runway, as mode ranking, the runway limits and auto additions ask for the same
+        // headings many times on every refresh. Not found isn't kept, in case the profile is still loading.
         private static double? GetRunwayHeading(string icao, string runwayName)
         {
-            if (icao == null) return null;
+            if (icao == null || runwayName == null) return null;
+
+            var key = $"{icao}/{runwayName}";
+
+            if (RunwayHeadings.TryGetValue(key, out var cached)) return cached;
+
+            var heading = FindRunwayHeading(icao, runwayName);
+
+            if (heading != null) RunwayHeadings[key] = heading.Value;
+
+            return heading;
+        }
+
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, double> RunwayHeadings =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, double>();
+
+        private static double? FindRunwayHeading(string icao, string runwayName)
+        {
 
             var airport = Airspace2.GetAirport(icao);
 
