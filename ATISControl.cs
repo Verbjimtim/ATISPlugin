@@ -542,8 +542,9 @@ namespace ATISPlugin
 
                 if (updatedLine == currentLine.Value) continue;
 
-                // The WIND field may carry crosswind and tailwind components added by the editor.
-                if (type == METARField.Wind && updatedLine == Wind.StripComponents(currentLine.Value)) continue;
+                // The WIND field may carry crosswind and tailwind components added by the editor, or other text the
+                // controller added after the wind.
+                if (type == METARField.Wind && updatedLine == Wind.Base(currentLine.Value)) continue;
 
                 var suggestLine = new ATISLine(currentLine.Name, 0, currentLine.Type, currentLine.NameSpoken, currentLine.NumbersGrouped, updatedLine, currentLine.METARField);
 

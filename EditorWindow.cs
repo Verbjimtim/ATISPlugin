@@ -2133,7 +2133,7 @@ namespace ATISPlugin
             if (line.METARField == METARField.Wind || line.Name == "RWY" || line.Name == SurfaceCondition.Field)
             {
                 // May rewrite the WIND field, which comes back through here to record it.
-                UpdateWindComponents();
+                UpdateWindComponents(line.METARField == METARField.Wind);
             }
 
             if (line.METARField == METARField.Wind || line.Name == "RWY")
@@ -2551,9 +2551,11 @@ namespace ATISPlugin
             return Wind.RunwaysInUse(runwayText);
         }
 
-        // Appends the worst case crosswind (from the airport's reporting threshold) and tailwind (when SFC COND
-        // isn't empty or DRY) for the runways named in the RWY field to the WIND field.
-        private void UpdateWindComponents()
+        // Adds the worst case crosswind (from the airport's reporting threshold) and tailwind (from 2KT on a dry
+        // runway, any when SFC COND isn't empty or DRY) for the runways named in the RWY field after the wind in
+        // the WIND field.
+        // windEdited is true when the WIND field itself was changed, rather than RWY or SFC COND.
+        private void UpdateWindComponents(bool windEdited)
         {
             if (UpdatingWindComponents || Control.IsZulu) return;
 
@@ -2567,11 +2569,56 @@ namespace ATISPlugin
 
             if (windBox == null || runwayBox == null) return;
 
-            var baseWind = Wind.StripComponents(windBox.Text);
+            var text = windBox.Text;
+
+            var wet = surfaceBox != null && SurfaceCondition.Rank(surfaceBox.Text) > 0;
+
+            // Only the components added here are replaced; anything else after the wind is the controller's and
+            // is kept as typed (a TW of their own, or a space part way through typing one).
+            var baseLength = Wind.LeadingLength(text);
+
+            var baseWind = text.Substring(0, baseLength);
+
+            var rest = text.Substring(baseLength);
+
+            // A new wind, RWY or SFC COND brings the components back after the controller has edited them.
+            var baseChanged = baseWind.Trim() != WindBaseLast;
+
+            WindBaseLast = baseWind.Trim();
+
+            if (!windEdited || baseChanged) WindComponentsEditedByHand = false;
+
+            var insertAt = 0;
+
+            var previous = WindComponentsAdded;
+
+            if (WindComponentsEditedByHand) return;
+
+            if (!string.IsNullOrEmpty(previous) && rest.Contains(previous))
+            {
+                insertAt = rest.IndexOf(previous, StringComparison.Ordinal);
+
+                rest = rest.Remove(insertAt, previous.Length);
+            }
+            else if (!string.IsNullOrEmpty(previous) && windEdited && !baseChanged)
+            {
+                // The controller has changed or deleted the components, so they're left as typed rather than
+                // added again on every keystroke.
+                WindComponentsEditedByHand = true;
+
+                WindComponentsAdded = null;
+
+                return;
+            }
+            else if (baseLength > 0)
+            {
+                // Components from before (a saved ATIS, or one edited by hand) are worked out again here.
+                rest = Wind.RemoveComponents(rest, true);
+            }
 
             var parsed = Wind.Parse(baseWind);
 
-            var output = baseWind;
+            var components = string.Empty;
 
             if (parsed != null)
             {
@@ -2580,8 +2627,6 @@ namespace ATISPlugin
 
                 var reportCrosswindFrom = PresetAirport?.ReportCrosswindFrom ?? PresetAirport.DefaultReportCrosswindFrom;
 
-                var wet = surfaceBox != null && SurfaceCondition.Rank(surfaceBox.Text) > 0;
-
                 var crosswinds = new List<string>();
                 var tailwinds = new List<string>();
 
@@ -2589,10 +2634,10 @@ namespace ATISPlugin
                 {
                     var heading = GetRunwayHeading(direction.First()) ?? int.Parse(direction.Key) * 10;
 
-                    var components = parsed.Worst(heading);
+                    var worst = parsed.Worst(heading);
 
-                    var crosswind = Math.Round(Math.Abs(components.Crosswind));
-                    var tailwind = Math.Round(components.Tailwind);
+                    var crosswind = Math.Round(Math.Abs(worst.Crosswind));
+                    var tailwind = Math.Round(worst.Tailwind);
 
                     // Only name the runway when there's more than one direction in use: the runway itself
                     // (e.g. 16L in SODPROPS), or just the number when parallels are used together.
@@ -2602,26 +2647,51 @@ namespace ATISPlugin
 
                     if (crosswind >= reportCrosswindFrom) crosswinds.Add($", MX XW {crosswind:F0}KTS{runway}");
 
-                    if (wet && tailwind > 0) tailwinds.Add($", MX TW {tailwind:F0}KTS{runway}");
+                    if (tailwind >= (wet ? 1 : ReportTailwindFromDry)) tailwinds.Add($", MX TW {tailwind:F0}KTS{runway}");
                 }
 
-                output += string.Concat(crosswinds) + string.Concat(tailwinds);
+                components = string.Concat(crosswinds) + string.Concat(tailwinds);
             }
 
-            if (windBox.Text == output) return;
+            WindComponentsAdded = components;
 
-            // Keep the caret where it was while the controller is typing in the WIND field.
+            var output = baseWind + rest.Insert(insertAt, components);
+
+            if (text == output) return;
+
+            // Keep the caret where it was while the controller is typing in the WIND field, moving it along with
+            // the text after the components when they change length.
             var selectionStart = windBox.SelectionStart;
+
+            if (selectionStart > baseLength + insertAt) selectionStart = Math.Max(baseLength + insertAt, selectionStart + output.Length - text.Length);
 
             UpdatingWindComponents = true;
 
             windBox.Text = output;
 
-            windBox.SelectionStart = Math.Min(selectionStart, baseWind.Length);
+            windBox.SelectionStart = Math.Min(selectionStart, output.Length);
 
             UpdatingWindComponents = false;
         }
 
+        // The lowest tailwind (kt) reported on a dry runway. Any tailwind is reported when it isn't dry.
+        private const int ReportTailwindFromDry = 2;
+
+        // The crosswind and tailwind components last added to the WIND field, so only those are replaced.
+        private string WindComponentsAdded { get; set; }
+
+        // The wind the components were last worked out for.
+        private string WindBaseLast { get; set; }
+
+        // Set when the controller changes the added components, until the wind, RWY or SFC COND changes.
+        private bool WindComponentsEditedByHand { get; set; }
+
+        private void ResetWindComponents()
+        {
+            WindComponentsAdded = null;
+            WindBaseLast = null;
+            WindComponentsEditedByHand = false;
+        }
         private double? GetRunwayHeading(string runwayName) => GetRunwayHeading(Control.ICAO, runwayName);
 
         private static double? GetRunwayHeading(string icao, string runwayName)
