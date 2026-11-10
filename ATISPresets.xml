@@ -67,10 +67,9 @@
   A <Mode> with the same name (e.g. "RWY 07") takes precedence.
 
   VisualCeiling="3100" on <Airport> is the lowest cloud base (ft) for visual approaches (default 3000). With APCH
-  empty, APCH gets an orange frame when one arrival runway is in use and the cloud base is below it or the
-  visibility is 5000M or less, and a red frame when more than one arrival runway is in use. Arrival runways are
-  those in RWY clauses mentioning ARR or ARRS, or every runway in RWY when none does.
-  ParallelVisual="true" on <Airport> (class D parallel runways) treats more than one arrival runway like one.
+  empty, APCH gets an orange frame when an arrival runway is in use and the cloud base is below it or the
+  visibility is 5000M or less, however many arrival runways there are. Arrival runways are those in RWY clauses
+  mentioning ARR or ARRS, or every runway in RWY when none does.
 
   Field names must match the Input names in the profile's ATIS.xml (APCH, RWY, SFC COND, OPR INFO, SIGWX).
   RWY values leave out the leading "RWY" because the field name is already spoken.
@@ -439,7 +438,7 @@
   <!-- Metro class D: MX XW is reported from 5KT (ReportCrosswindFrom). PROPS modes are split by direction,
        with RWY giving that direction's runways from the SOP formats (which list both ends together). -->
 
-  <Airport ICAO="YBAF" VisualCeiling="2900" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5" ParallelVisual="true">
+  <Airport ICAO="YBAF" VisualCeiling="2900" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5">
     <Mode Name="10 PROPS" Priority="1">
       <Field Name="RWY">10L FOR ARRS AND DEPS NORTH. RWY 10R FOR ARRS AND DEPS SOUTH</Field>
     </Mode>
@@ -477,7 +476,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YSBK" ReportCrosswindFrom="5" ParallelVisual="true">
+  <Airport ICAO="YSBK" ReportCrosswindFrom="5">
     <Mode Name="29 PROPS" Priority="1">
       <Field Name="RWY">29R FOR ARRS AND DEPS. RWY 29L FOR CCT TRAINING. RWY 29C IN USE</Field>
     </Mode>
@@ -507,7 +506,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YPJT" ReportCrosswindFrom="5" ParallelVisual="true">
+  <Airport ICAO="YPJT" ReportCrosswindFrom="5">
     <Mode Name="06 PROPS" Priority="1">
       <Field Name="RWY">06R FOR CCTS AND DEPS VIA ARMADALE SHOPS. RWY 06L FOR ARRS AND ALL OTHER DEPS</Field>
     </Mode>
@@ -528,7 +527,7 @@
     </Presets>
   </Airport>
 
-  <Airport ICAO="YMMB" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5" ParallelVisual="true">
+  <Airport ICAO="YMMB" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5">
     <Mode Name="17 PROPS" Priority="1">
       <Field Name="RWY">17L FOR ARRS AND DEPS EAST. RWY 17R FOR ARRS AND DEPS WEST</Field>
     </Mode>
@@ -555,7 +554,7 @@
     </Mode>
   </Airport>
 
-  <Airport ICAO="YPPF" VisualCeiling="2100" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5" ParallelVisual="true">
+  <Airport ICAO="YPPF" VisualCeiling="2100" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5">
     <Mode Name="03 PROPS" Priority="1">
       <Field Name="RWY">03R FOR ARRS AND DEPS EAST. RWY 03L FOR ARRS AND DEPS WEST</Field>
     </Mode>
@@ -588,7 +587,7 @@
 
   <!-- ===================== Procedural ===================== -->
 
-  <Airport ICAO="YSTW" ParallelVisual="true">
+  <Airport ICAO="YSTW">
     <Mode Name="12 PROPS" Priority="1">
       <Field Name="RWY">12L AND R FOR ARRS AND DEPS</Field>
       <Field Name="OPR INFO">SIMUL PARL RWY OPS IN USE. EXP TFC ON FINAL AND OPP BASE OF THE PARL RWY</Field>

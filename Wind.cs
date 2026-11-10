@@ -23,10 +23,42 @@ namespace ATISPlugin
 
         public static string StripComponents(string wind) => SuffixRegex.Replace(wind ?? string.Empty, string.Empty).Trim();
 
-        // Returns null for CALM, VRB or anything else that has no usable direction.
+        private static readonly Regex CrosswindRegex = new Regex(",?\\s*(?:MX XW|XW MAX) \\d+\\s?KTS?(?: RWY \\d{2}[LRC]?)?", RegexOptions.IgnoreCase);
+
+        private static readonly Regex TailwindRegex = new Regex(",?\\s*(?:MX TW|TW MAX) \\d+\\s?KTS?(?: RWY \\d{2}[LRC]?)?", RegexOptions.IgnoreCase);
+
+        // Removes crosswind components (and tailwind ones too, if asked), leaving any other text exactly as typed.
+        public static string RemoveComponents(string text, bool tailwinds)
+        {
+            var output = CrosswindRegex.Replace(text ?? string.Empty, string.Empty);
+
+            return tailwinds ? TailwindRegex.Replace(output, string.Empty) : output;
+        }
+
+        // The wind at the start of the WIND field (e.g. 220/11 in "220/11, MX XW 11KTS"), whatever follows it.
+        private static readonly Regex LeadingWindRegex = new Regex("^\\s*(\\d{3})(?:-(\\d{3}))?/(\\d{1,3})(?:-(\\d{1,3}))?(?=$|[\\s,])");
+
+        // The length of the wind at the start of the field, or 0 when it doesn't start with one (CALM, VRB, or
+        // part way through typing it).
+        public static int LeadingLength(string text)
+        {
+            var match = LeadingWindRegex.Match(text ?? string.Empty);
+
+            return match.Success ? match.Length : 0;
+        }
+
+        // The wind without anything the editor or the controller added after it, to compare with the METAR's.
+        public static string Base(string text)
+        {
+            var length = LeadingLength(text);
+
+            return length > 0 ? text.Substring(0, length).Trim() : StripComponents(text);
+        }
+
+        // Returns null for CALM, VRB or anything else that has no usable direction. Text after the wind is ignored.
         public static Wind Parse(string wind)
         {
-            var match = WindRegex.Match(StripComponents(wind));
+            var match = LeadingWindRegex.Match(wind ?? string.Empty);
 
             if (!match.Success) return null;
 

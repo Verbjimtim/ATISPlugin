@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Linq;
 using vatsys;
 
@@ -10,10 +11,25 @@ namespace ATISPlugin
         // Degrees to add to a true direction to make it magnetic. vatSys stores East variation as negative
         // (YSSY is -13), so this is the airport position's MagneticVariation. Airports without one have it
         // estimated from their runways, whose numbers are magnetic. Null when neither is available.
+        // Worked out once per airport: finding it searches every position in the profile, and the runway logic
+        // asks for it for every runway of every mode. Not found isn't kept, in case the profile is still loading.
         public static double? Variation(string icao)
         {
             if (string.IsNullOrWhiteSpace(icao)) return null;
 
+            if (Variations.TryGetValue(icao, out var cached)) return cached;
+
+            var variation = Find(icao);
+
+            if (variation != null) Variations[icao] = variation.Value;
+
+            return variation;
+        }
+
+        private static readonly ConcurrentDictionary<string, double> Variations = new ConcurrentDictionary<string, double>();
+
+        private static double? Find(string icao)
+        {
             var position = LogicalPositions.Positions?.FirstOrDefault(x => x.Name == icao);
 
             if (position != null && position.MagneticVariation != 0) return position.MagneticVariation;

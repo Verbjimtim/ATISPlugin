@@ -157,6 +157,8 @@ namespace ATISPlugin
 
                 // Only once the ATIS exist to take the METARs.
                 MET.Instance.ProductsChanged += METARChanged;
+
+                Network.OnlineATCChanged += Network_OnlineATCChanged;
             }
             catch (Exception ex)
             {
@@ -425,6 +427,37 @@ namespace ATISPlugin
             catch (Exception ex)
             {
                 Errors.Add(new Exception($"Could not check ATIS timed updates: {ex.Message}"), DisplayName);
+            }
+
+            CheckZuluContacts();
+        }
+
+        // Raised off the GUI thread as controllers log on and off. The minute timer checks as well.
+        private void Network_OnlineATCChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                MMI.InvokeOnGUI(delegate () { CheckZuluContacts(); });
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not check the Zulu ATIS contact: {ex.Message}"), DisplayName);
+            }
+        }
+
+        // Suggests a new contact on any Zulu ATIS whose best online station has changed.
+        private void CheckZuluContacts()
+        {
+            try
+            {
+                foreach (var atis in AllATIS)
+                {
+                    if (atis.CheckZuluContact()) OnMETARUpdate(atis.Number, true);
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not check the Zulu ATIS contact: {ex.Message}"), DisplayName);
             }
         }
 
@@ -702,6 +735,8 @@ namespace ATISPlugin
             try
             {
                 MET.Instance.ProductsChanged -= METARChanged;
+
+                Network.OnlineATCChanged -= Network_OnlineATCChanged;
 
                 BroadcastTimer.Stop();
                 BroadcastTimer.Dispose();

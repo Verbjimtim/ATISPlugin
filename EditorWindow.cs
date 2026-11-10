@@ -31,6 +31,8 @@ namespace ATISPlugin
         public int Number { get; private set; } = 1;
         private Dictionary<string, string> Saves { get; set; } = new Dictionary<string, string>();
         private string Mode { get; set; }
+        // The airport of the ATIS the window last showed, to notice when that ATIS has been deleted.
+        private string LoadedICAO { get; set; }
         private PresetAirport PresetAirport => ICAO == null ? null : Plugin.Presets.GetAirport(ICAO);
         private Dictionary<int, PresetButton> PresetButtons { get; set; } = new Dictionary<int, PresetButton>();
         private bool Edits => Saves.Any() || 
@@ -43,7 +45,33 @@ namespace ATISPlugin
         public EventHandler<RefreshEventArgs> RefreshEvent { get; set; }
         public string VoiceName { get; set; }
         public PromptRate Rate { get; set; } 
-        private string ZuluFrequency { get; set; }
+        // Kept with the ATIS, as the window switches between ATIS. Empty means AUTO (the airport's contacts).
+        private string ZuluFrequency
+        {
+            get => Control?.ZuluFrequency;
+            set { if (Control != null) Control.ZuluFrequency = value; }
+        }
+
+        // First in the Zulu frequency list: fill the contact from the airport's online stations.
+        private const string ZuluAuto = "AUTO";
+
+        private void LoadZuluFrequencies()
+        {
+            if (ComboBoxZuluFrequency.Items == null) ComboBoxZuluFrequency.Items = new List<string>();
+
+            ComboBoxZuluFrequency.Items.Clear();
+
+            ComboBoxZuluFrequency.Items.Add(ZuluAuto);
+
+            foreach (var frequency in Plugin.Frequencies)
+            {
+                ComboBoxZuluFrequency.Items.Add(string.IsNullOrWhiteSpace(frequency.FriendlyName) ? frequency.Name : frequency.FriendlyName);
+            }
+
+            var index = string.IsNullOrWhiteSpace(ZuluFrequency) ? 0 : ComboBoxZuluFrequency.Items.IndexOf(ZuluFrequency);
+
+            ComboBoxZuluFrequency.SelectedIndex = Math.Max(index, 0);
+        }
         public bool CanRecord => Edits == false && Control.Broadcasting == false ? true : false;
         private bool Initialized { get; set; }
 
@@ -80,32 +108,44 @@ namespace ATISPlugin
         {
             try
             {
-                Number = number;
-
-                ICAO = Control.ICAO;
-
-                ID = Control.ID;
-
-                Mode = Control.Mode;
-
-                TimeCheck = Control.TimeCheck;
-
-                Rate = Control.PromptRate;
-
-                VoiceName = Control.VoiceName;
-
-                Saves.Clear();
-
-                LoadOptions();
-
-                RefreshForm_ClearWindCalculator();
-
-                RefreshForm();
+                using (PauseDrawing())
+                {
+                    ChangeNow(number);
+                }
             }
             catch (Exception ex)
             {
                 Errors.Add(new Exception($"Could not load ATIS {number}: {ex.Message}"), Plugin.DisplayName);
             }
+        }
+
+        private void ChangeNow(int number)
+        {
+            Number = number;
+
+            ICAO = Control.ICAO;
+
+            LoadedICAO = Control.ICAO;
+
+            ResetWindComponents();
+
+            ID = Control.ID;
+
+            Mode = Control.Mode;
+
+            TimeCheck = Control.TimeCheck;
+
+            Rate = Control.PromptRate;
+
+            VoiceName = Control.VoiceName;
+
+            Saves.Clear();
+
+            LoadOptions();
+
+            RefreshForm_ClearWindCalculator();
+
+            RefreshForm();
         }
 
         private void OnRefreshEvent(object sender, RefreshEventArgs e)
@@ -640,17 +680,7 @@ namespace ATISPlugin
 
             ComboBoxVoice.Items.Add(Plugin.ManualVoiceName);
 
-            ComboBoxZuluFrequency.Items.Clear();
-
-            if (Plugin.Frequencies.Any())
-            {
-                foreach (var frequency in Plugin.Frequencies)
-                {
-                    ComboBoxZuluFrequency.Items.Add(string.IsNullOrWhiteSpace(frequency.FriendlyName) ? frequency.Name : frequency.FriendlyName);
-                }
-
-                ComboBoxZuluFrequency.SelectedIndex = 0;
-            }
+            LoadZuluFrequencies();
 
             foreach (var line in Control.Lines)
             {
@@ -700,86 +730,152 @@ namespace ATISPlugin
 
         public void RefreshForm()
         {
-            Invoke(new Action(() => {
-
-                if (!Initialized) return;
-
-                if (Plugin.SingleATISOnly && Number != 1)
+            Invoke(new Action(() =>
+            {
+                using (PauseDrawing())
                 {
-                    Change(1);
-
-                    return;
+                    RefreshFormNow();
                 }
-
-                if (Profile.Name.Contains("VATNZ"))
-                {
-                    ButtonZulu.Visible = false;
-                }
-                else
-                {
-                    ButtonZulu.Visible = true;
-                }
-
-                if (ICAO == null)
-                {
-                    ComboBoxAirport.SelectedIndex = ComboBoxAirport.Items.IndexOf("");
-                }
-                else
-                {
-                    var index = ComboBoxAirport.Items.IndexOf(DisplayName);
-
-                    if (ComboBoxAirport.SelectedIndex != index) ComboBoxAirport.SelectedIndex = ComboBoxAirport.Items.IndexOf(DisplayName);
-                }
-
-                ComboBoxLetter.SelectedIndex = ComboBoxLetter.Items.IndexOf(ID.ToString());
-
-                SetText(TextBoxMode, Mode);
-
-                if (VoiceName != null)
-                {
-                    ComboBoxVoice.SelectedIndex = ComboBoxVoice.Items.IndexOf(VoiceName);
-                }
-
-                ComboBoxRate.SelectedIndex = ComboBoxRate.Items.IndexOf(Rate.ToString());
-
-                ComboBoxTimeCheck.SelectedIndex = ComboBoxTimeCheck.Items.IndexOf(TimeCheck.ToString());
-
-                if (ComboBoxZuluFrequency.Items == null) ComboBoxZuluFrequency.Items = new List<string>();
-
-                ComboBoxZuluFrequency.Items.Clear();
-
-                foreach (var frequency in Plugin.Frequencies)
-                {
-                    ComboBoxZuluFrequency.Items.Add(string.IsNullOrWhiteSpace(frequency.FriendlyName) ? frequency.Name : frequency.FriendlyName);
-                }
-
-                if (!string.IsNullOrWhiteSpace(ZuluFrequency))
-                {
-                    ComboBoxZuluFrequency.SelectedIndex = ComboBoxZuluFrequency.Items.IndexOf(ZuluFrequency);
-                }
-
-                RefreshForm_TopButtons();
-
-                if (Network.IsConnected && Control?.ICAO == null)
-                {
-                    RefreshForm_ClearWindCalculator();
-                    RefreshFrom_NoATIS();
-                }
-                else if (Network.IsConnected && Control?.ICAO != null)
-                {
-                    RefreshForm_WithATIS();
-                }
-                else
-                {
-                    RefreshForm_ClearWindCalculator();
-                    RefreshForm_NotConnected();
-                }
-
-                RefreshForm_Presets();
-
-                AutoSelectMode();
-
             }));
+        }
+
+        private void RefreshFormNow()
+        {
+            if (!Initialized) return;
+
+            if (Plugin.SingleATISOnly && Number != 1)
+            {
+                Change(1);
+
+                return;
+            }
+
+            // The ATIS was deleted somewhere other than the Delete button (disconnecting, or changing
+            // position), so the window's own copy of its mode, letter and airport is reset the same way.
+            if (LoadedICAO != null && Control.ICAO == null)
+            {
+                Change(Number);
+
+                return;
+            }
+
+            LoadedICAO = Control.ICAO;
+
+            if (Profile.Name.Contains("VATNZ"))
+            {
+                ButtonZulu.Visible = false;
+            }
+            else
+            {
+                ButtonZulu.Visible = true;
+            }
+
+            if (ICAO == null)
+            {
+                ComboBoxAirport.SelectedIndex = ComboBoxAirport.Items.IndexOf("");
+            }
+            else
+            {
+                var index = ComboBoxAirport.Items.IndexOf(DisplayName);
+
+                if (ComboBoxAirport.SelectedIndex != index) ComboBoxAirport.SelectedIndex = ComboBoxAirport.Items.IndexOf(DisplayName);
+            }
+
+            ComboBoxLetter.SelectedIndex = ComboBoxLetter.Items.IndexOf(ID.ToString());
+
+            SetText(TextBoxMode, Mode);
+
+            if (VoiceName != null)
+            {
+                ComboBoxVoice.SelectedIndex = ComboBoxVoice.Items.IndexOf(VoiceName);
+            }
+
+            ComboBoxRate.SelectedIndex = ComboBoxRate.Items.IndexOf(Rate.ToString());
+
+            ComboBoxTimeCheck.SelectedIndex = ComboBoxTimeCheck.Items.IndexOf(TimeCheck.ToString());
+
+            LoadZuluFrequencies();
+
+            RefreshForm_TopButtons();
+
+            if (Network.IsConnected && Control?.ICAO == null)
+            {
+                RefreshForm_ClearWindCalculator();
+                RefreshFrom_NoATIS();
+            }
+            else if (Network.IsConnected && Control?.ICAO != null)
+            {
+                RefreshForm_WithATIS();
+            }
+            else
+            {
+                RefreshForm_ClearWindCalculator();
+                RefreshForm_NotConnected();
+            }
+
+            RefreshForm_Presets();
+
+            AutoSelectMode();
+        }
+
+        private int DrawingPaused { get; set; }
+
+        // Stops the window drawing until disposed, then draws it once. Switching ATIS changes dozens of controls
+        // (shown, hidden, moved, refilled and recoloured), and drawing after each change made switching lag.
+        // Nested pauses draw once, when the outermost ends.
+        private IDisposable PauseDrawing()
+        {
+            if (!IsHandleCreated) return new DrawingPause(null);
+
+            if (DrawingPaused++ == 0)
+            {
+                SuspendLayout();
+
+                NativeMethods.SendMessage(Handle, NativeMethods.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+            }
+
+            return new DrawingPause(() =>
+            {
+                if (--DrawingPaused > 0) return;
+
+                NativeMethods.SendMessage(Handle, NativeMethods.WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
+
+                ResumeLayout();
+
+                NativeMethods.RedrawWindow(Handle, IntPtr.Zero, IntPtr.Zero,
+                    NativeMethods.RDW_ERASE | NativeMethods.RDW_FRAME | NativeMethods.RDW_INVALIDATE | NativeMethods.RDW_ALLCHILDREN);
+            });
+        }
+
+        private sealed class DrawingPause : IDisposable
+        {
+            private Action OnDispose { get; set; }
+
+            public DrawingPause(Action onDispose) { OnDispose = onDispose; }
+
+            public void Dispose()
+            {
+                var action = OnDispose;
+
+                OnDispose = null;
+
+                action?.Invoke();
+            }
+        }
+
+        private static class NativeMethods
+        {
+            public const int WM_SETREDRAW = 0x000B;
+            public const uint RDW_INVALIDATE = 0x0001;
+            public const uint RDW_ERASE = 0x0004;
+            public const uint RDW_ALLCHILDREN = 0x0080;
+            public const uint RDW_FRAME = 0x0400;
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            public static extern bool RedrawWindow(IntPtr hWnd, IntPtr rect, IntPtr region, uint flags);
         }
 
         // Current weather for ranking runway modes: the METAR, plus SFC COND for a wet runway.
@@ -865,32 +961,19 @@ namespace ATISPlugin
                 }
             }
 
-            // An empty APCH means visual approaches: an error with more than one arrival runway, and outside the
-            // limits when the cloud base or visibility doesn't allow them.
-            var approachError = false;
-
-            if (active && approachBox != null && string.IsNullOrWhiteSpace(approachBox.Text) && runwayBox != null)
+            // An empty APCH means visual approaches, outside the limits when the cloud base or visibility doesn't
+            // allow them. How many runways are in use doesn't matter.
+            if (active && approachBox != null && string.IsNullOrWhiteSpace(approachBox.Text) && runwayBox != null
+                && Wind.ArrivalRunways(runwayBox.Text).Any())
             {
-                var arrivals = Wind.ArrivalRunways(runwayBox.Text);
+                var visualCeiling = PresetAirport?.VisualCeiling ?? PresetAirport.DefaultVisualCeiling;
 
-                if (arrivals.Count > 1 && !(PresetAirport?.ParallelVisual ?? false))
-                {
-                    approachError = true;
-                }
-                else if (arrivals.Any())
-                {
-                    var visualCeiling = PresetAirport?.VisualCeiling ?? PresetAirport.DefaultVisualCeiling;
-
-                    approachOutside = conditions.Ceiling < visualCeiling || conditions.Visibility <= PresetAirport.VisualVisibility;
-                }
+                approachOutside = conditions.Ceiling < visualCeiling || conditions.Visibility <= PresetAirport.VisualVisibility;
             }
 
             SetHighlight(runwayLine, runwayOutside, OutsideLimitsColour);
-            SetHighlight(approachLine, approachOutside || approachError, approachError ? ErrorColour : OutsideLimitsColour);
+            SetHighlight(approachLine, approachOutside, OutsideLimitsColour);
         }
-
-        // The profile's emergency red, for an ATIS that has to be wrong.
-        private static System.Drawing.Color ErrorColour => Colours.GetColour(Colours.Identities.Emergency);
 
         // The profile's VSCS active frequency green.
         private static System.Drawing.Color RunwayChangeColour => Colours.GetColour(Colours.Identities.VSCSActiveFrequency);
@@ -1082,21 +1165,47 @@ namespace ATISPlugin
 
             ResumeLayout();
 
-            if (WindowChrome == null)
+            if (WindowChrome == null && WindowState != FormWindowState.Minimized)
             {
                 var chrome = Height - ClientSize.Height;
                 WindowChrome = chrome > 0 ? chrome : 28;
             }
 
-            var height = clientHeight + WindowChrome.Value;
+            PendingHeight = clientHeight + (WindowChrome ?? 28);
 
-            if (Height == height) return;
+            ApplyWindowSize();
+        }
+
+        // The window's width never changes, but it can be scaled up from the designed 680 at load
+        // (AutoScaleMode.Font), so it's taken from the window the first time it's laid out un-minimised.
+        private int? WindowWidth { get; set; }
+        private int? PendingHeight { get; set; }
+
+        // Locks the window to its width and the height the layout needs. While minimised the window's
+        // size is the caption bar's, so locking then would keep it that narrow once restored; the size is
+        // applied when it's restored instead.
+        private void ApplyWindowSize()
+        {
+            if (PendingHeight == null || WindowState == FormWindowState.Minimized) return;
+
+            if (WindowWidth == null) WindowWidth = Width >= 680 ? Width : 680;
+
+            var size = new System.Drawing.Size(WindowWidth.Value, PendingHeight.Value);
+
+            if (Size == size && MinimumSize == size && MaximumSize == size) return;
 
             MinimumSize = System.Drawing.Size.Empty;
             MaximumSize = System.Drawing.Size.Empty;
-            Height = height;
-            MinimumSize = new System.Drawing.Size(Width, height);
-            MaximumSize = new System.Drawing.Size(Width, height);
+            Size = size;
+            MinimumSize = size;
+            MaximumSize = size;
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+
+            if (IsHandleCreated && WindowState != FormWindowState.Minimized) BeginInvoke(new Action(ApplyWindowSize));
         }
 
         private Label GetLabel(int number)
@@ -2098,7 +2207,7 @@ namespace ATISPlugin
             if (line.METARField == METARField.Wind || line.Name == "RWY" || line.Name == SurfaceCondition.Field)
             {
                 // May rewrite the WIND field, which comes back through here to record it.
-                UpdateWindComponents();
+                UpdateWindComponents(line.METARField == METARField.Wind);
             }
 
             if (line.METARField == METARField.Wind || line.Name == "RWY")
@@ -2360,6 +2469,8 @@ namespace ATISPlugin
             {
                 Control.IsZulu = true;
 
+                ZuluFrequency = null;
+
                 GenerateZulu();
             }
             else
@@ -2378,13 +2489,18 @@ namespace ATISPlugin
         {
             if (ComboBoxZuluFrequency.SelectedIndex == -1) return;
 
-            var zuluFrequency = ComboBoxZuluFrequency.Items[ComboBoxZuluFrequency.SelectedIndex];
+            var zuluFrequency = ComboBoxZuluFrequency.SelectedIndex == 0 ? null : ComboBoxZuluFrequency.Items[ComboBoxZuluFrequency.SelectedIndex];
 
-            if (zuluFrequency == ZuluFrequency) return;
+            if (zuluFrequency == ZuluFrequency || (string.IsNullOrEmpty(zuluFrequency) && string.IsNullOrEmpty(ZuluFrequency))) return;
 
             ZuluFrequency = zuluFrequency;
 
+            if (!Control.IsZulu) return;
+
             GenerateZulu();
+
+            ButtonSave.Enabled = true;
+            ButtonCancel.Enabled = true;
         });
 
         private void GenerateZulu()
@@ -2399,15 +2515,28 @@ namespace ATISPlugin
 
             var atis = zuluInfo.Text;
 
-            var frequency = Plugin.Frequencies.FirstOrDefault(x => x.Name == ZuluFrequency || x.FriendlyName == ZuluFrequency);
+            // A frequency picked by hand, otherwise the first of the airport's contacts that's online. With
+            // neither, {STATION} {FREQ} stay for the controller to fill in.
+            var frequency = string.IsNullOrWhiteSpace(ZuluFrequency) ? null
+                : Plugin.Frequencies.FirstOrDefault(x => x.Name == ZuluFrequency || x.FriendlyName == ZuluFrequency);
 
             if (frequency != null)
             {
                 var station = string.IsNullOrWhiteSpace(frequency.FriendlyName) ? frequency.Name : frequency.FriendlyName;
-                
+
                 atis = atis.Replace("{STATION}", station.ToUpper());
-                
+
                 atis = atis.Replace("{FREQ}", Conversions.FrequencyToString(frequency.Frequency));
+            }
+            else
+            {
+                var contact = Zulu.FindContact(zuluInfo);
+
+                Control.ZuluContact = contact;
+
+                if (contact != null) Control.ZuluContactsGiven.Add(contact);
+
+                atis = Zulu.Fill(atis, contact);
             }
 
             zuluLine.Value = atis;
@@ -2496,9 +2625,11 @@ namespace ATISPlugin
             return Wind.RunwaysInUse(runwayText);
         }
 
-        // Appends the worst case crosswind (from the airport's reporting threshold) and tailwind (when SFC COND
-        // isn't empty or DRY) for the runways named in the RWY field to the WIND field.
-        private void UpdateWindComponents()
+        // Adds the worst case crosswind (from the airport's reporting threshold) and tailwind (from 2KT on a dry
+        // runway, any when SFC COND isn't empty or DRY) for the runways named in the RWY field after the wind in
+        // the WIND field.
+        // windEdited is true when the WIND field itself was changed, rather than RWY or SFC COND.
+        private void UpdateWindComponents(bool windEdited)
         {
             if (UpdatingWindComponents || Control.IsZulu) return;
 
@@ -2512,11 +2643,56 @@ namespace ATISPlugin
 
             if (windBox == null || runwayBox == null) return;
 
-            var baseWind = Wind.StripComponents(windBox.Text);
+            var text = windBox.Text;
+
+            var wet = surfaceBox != null && SurfaceCondition.Rank(surfaceBox.Text) > 0;
+
+            // Only the components added here are replaced; anything else after the wind is the controller's and
+            // is kept as typed (a TW of their own, or a space part way through typing one).
+            var baseLength = Wind.LeadingLength(text);
+
+            var baseWind = text.Substring(0, baseLength);
+
+            var rest = text.Substring(baseLength);
+
+            // A new wind, RWY or SFC COND brings the components back after the controller has edited them.
+            var baseChanged = baseWind.Trim() != WindBaseLast;
+
+            WindBaseLast = baseWind.Trim();
+
+            if (!windEdited || baseChanged) WindComponentsEditedByHand = false;
+
+            var insertAt = 0;
+
+            var previous = WindComponentsAdded;
+
+            if (WindComponentsEditedByHand) return;
+
+            if (!string.IsNullOrEmpty(previous) && rest.Contains(previous))
+            {
+                insertAt = rest.IndexOf(previous, StringComparison.Ordinal);
+
+                rest = rest.Remove(insertAt, previous.Length);
+            }
+            else if (!string.IsNullOrEmpty(previous) && windEdited && !baseChanged)
+            {
+                // The controller has changed or deleted the components, so they're left as typed rather than
+                // added again on every keystroke.
+                WindComponentsEditedByHand = true;
+
+                WindComponentsAdded = null;
+
+                return;
+            }
+            else if (baseLength > 0)
+            {
+                // Components from before (a saved ATIS, or one edited by hand) are worked out again here.
+                rest = Wind.RemoveComponents(rest, true);
+            }
 
             var parsed = Wind.Parse(baseWind);
 
-            var output = baseWind;
+            var components = string.Empty;
 
             if (parsed != null)
             {
@@ -2525,8 +2701,6 @@ namespace ATISPlugin
 
                 var reportCrosswindFrom = PresetAirport?.ReportCrosswindFrom ?? PresetAirport.DefaultReportCrosswindFrom;
 
-                var wet = surfaceBox != null && SurfaceCondition.Rank(surfaceBox.Text) > 0;
-
                 var crosswinds = new List<string>();
                 var tailwinds = new List<string>();
 
@@ -2534,10 +2708,10 @@ namespace ATISPlugin
                 {
                     var heading = GetRunwayHeading(direction.First()) ?? int.Parse(direction.Key) * 10;
 
-                    var components = parsed.Worst(heading);
+                    var worst = parsed.Worst(heading);
 
-                    var crosswind = Math.Round(Math.Abs(components.Crosswind));
-                    var tailwind = Math.Round(components.Tailwind);
+                    var crosswind = Math.Round(Math.Abs(worst.Crosswind));
+                    var tailwind = Math.Round(worst.Tailwind);
 
                     // Only name the runway when there's more than one direction in use: the runway itself
                     // (e.g. 16L in SODPROPS), or just the number when parallels are used together.
@@ -2547,31 +2721,76 @@ namespace ATISPlugin
 
                     if (crosswind >= reportCrosswindFrom) crosswinds.Add($", MX XW {crosswind:F0}KTS{runway}");
 
-                    if (wet && tailwind > 0) tailwinds.Add($", MX TW {tailwind:F0}KTS{runway}");
+                    if (tailwind >= (wet ? 1 : ReportTailwindFromDry)) tailwinds.Add($", MX TW {tailwind:F0}KTS{runway}");
                 }
 
-                output += string.Concat(crosswinds) + string.Concat(tailwinds);
+                components = string.Concat(crosswinds) + string.Concat(tailwinds);
             }
 
-            if (windBox.Text == output) return;
+            WindComponentsAdded = components;
 
-            // Keep the caret where it was while the controller is typing in the WIND field.
+            var output = baseWind + rest.Insert(insertAt, components);
+
+            if (text == output) return;
+
+            // Keep the caret where it was while the controller is typing in the WIND field, moving it along with
+            // the text after the components when they change length.
             var selectionStart = windBox.SelectionStart;
+
+            if (selectionStart > baseLength + insertAt) selectionStart = Math.Max(baseLength + insertAt, selectionStart + output.Length - text.Length);
 
             UpdatingWindComponents = true;
 
             windBox.Text = output;
 
-            windBox.SelectionStart = Math.Min(selectionStart, baseWind.Length);
+            windBox.SelectionStart = Math.Min(selectionStart, output.Length);
 
             UpdatingWindComponents = false;
         }
 
+        // The lowest tailwind (kt) reported on a dry runway. Any tailwind is reported when it isn't dry.
+        private const int ReportTailwindFromDry = 2;
+
+        // The crosswind and tailwind components last added to the WIND field, so only those are replaced.
+        private string WindComponentsAdded { get; set; }
+
+        // The wind the components were last worked out for.
+        private string WindBaseLast { get; set; }
+
+        // Set when the controller changes the added components, until the wind, RWY or SFC COND changes.
+        private bool WindComponentsEditedByHand { get; set; }
+
+        private void ResetWindComponents()
+        {
+            WindComponentsAdded = null;
+            WindBaseLast = null;
+            WindComponentsEditedByHand = false;
+        }
+
         private double? GetRunwayHeading(string runwayName) => GetRunwayHeading(Control.ICAO, runwayName);
 
+        // Worked out once per runway, as mode ranking, the runway limits and auto additions ask for the same
+        // headings many times on every refresh. Not found isn't kept, in case the profile is still loading.
         private static double? GetRunwayHeading(string icao, string runwayName)
         {
-            if (icao == null) return null;
+            if (icao == null || runwayName == null) return null;
+
+            var key = $"{icao}/{runwayName}";
+
+            if (RunwayHeadings.TryGetValue(key, out var cached)) return cached;
+
+            var heading = FindRunwayHeading(icao, runwayName);
+
+            if (heading != null) RunwayHeadings[key] = heading.Value;
+
+            return heading;
+        }
+
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, double> RunwayHeadings =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, double>();
+
+        private static double? FindRunwayHeading(string icao, string runwayName)
+        {
 
             var airport = Airspace2.GetAirport(icao);
 

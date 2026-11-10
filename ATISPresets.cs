@@ -29,7 +29,6 @@ namespace ATISPlugin
                 ReportCrosswindFrom = matches.Select(x => x.ReportCrosswindFrom).Where(x => x != PresetAirport.DefaultReportCrosswindFrom).DefaultIfEmpty(PresetAirport.DefaultReportCrosswindFrom).First(),
                 TimeZone = matches.Select(x => x.TimeZone).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)),
                 VisualCeiling = matches.Select(x => x.VisualCeiling).Where(x => x != PresetAirport.DefaultVisualCeiling).DefaultIfEmpty(PresetAirport.DefaultVisualCeiling).First(),
-                ParallelVisual = matches.Any(x => x.ParallelVisual),
                 Modes = matches.SelectMany(x => x.Modes).ToList(),
                 Fields = matches.SelectMany(x => x.Fields).ToList(),
                 Defaults = matches.SelectMany(x => x.Defaults).GroupBy(x => x.Name).Select(x => x.First()).ToList(),
@@ -65,11 +64,6 @@ namespace ATISPlugin
         public int VisualCeiling { get; set; } = DefaultVisualCeiling;
 
         public const int VisualVisibility = 5000;
-
-        // Parallel runway arrivals with an empty APCH are normal here (class D circuits), so they're only checked
-        // against the visual minima rather than flagged as an error.
-        [XmlAttribute]
-        public bool ParallelVisual { get; set; }
 
         // Windows time zone ID (e.g. "AUS Eastern Standard Time") for modes with local Hours.
         [XmlAttribute]

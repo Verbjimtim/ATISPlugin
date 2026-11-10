@@ -48,7 +48,6 @@ namespace ATISPlugin
         private PromptBuilder ATISSpoken { get; set; }
         private SpeechAudioFormatInfo SpeechFormat { get; set; }
         public string METARRaw { get; set; }
-        public string METARLastRaw { get; set; }
         private WaveFormat WaveForm { get; set; } = new WaveFormat(48000, 1);
         public PromptRate PromptRate { get; set; } = PromptRate.Medium;
         public InstalledVoice InstalledVoice => SpeechSynth.GetInstalledVoices().FirstOrDefault(x => x.VoiceInfo.Name == VoiceName);
@@ -254,8 +253,10 @@ namespace ATISPlugin
             Callsign = null;
             VisPoint = null;
             IsZulu = false;
+            ZuluFrequency = null;
+            ZuluContact = null;
+            ZuluContactsGiven.Clear();
 
-            METARLastRaw = null;
             METARRaw = null;
 
             foreach (var line in Lines)
@@ -498,9 +499,9 @@ namespace ATISPlugin
 
         public void SuggestionsCancel()
         {
-            // Forget the METAR whose suggestions are being dropped, so they're suggested again the next time it arrives.
-            if (SuggestedLines.Any(x => x.METARField != METARField.None)) METARRaw = METARLastRaw;
-
+            // The cancelled METAR stays the last one seen. vatSys sends the same METAR again every minute or so, and
+            // forgetting it suggested the same changes (and played the update sound) each time. A new METAR is
+            // still suggested against the ATIS as it stands, and Load METAR applies the current one again.
             SuggestedLines.Clear();
 
             SuggestedMode = null;
@@ -520,8 +521,6 @@ namespace ATISPlugin
             if (metar == METARRaw && !force) return false;
 
             if (IsZulu && !string.IsNullOrWhiteSpace(METARRaw)) return false;
-
-            if (metar != METARRaw) METARLastRaw = METARRaw;
 
             METARRaw = metar;
 
@@ -543,8 +542,9 @@ namespace ATISPlugin
 
                 if (updatedLine == currentLine.Value) continue;
 
-                // The WIND field may carry crosswind and tailwind components added by the editor.
-                if (type == METARField.Wind && updatedLine == Wind.StripComponents(currentLine.Value)) continue;
+                // The WIND field may carry crosswind and tailwind components added by the editor, or other text the
+                // controller added after the wind.
+                if (type == METARField.Wind && updatedLine == Wind.Base(currentLine.Value)) continue;
 
                 var suggestLine = new ATISLine(currentLine.Name, 0, currentLine.Type, currentLine.NameSpoken, currentLine.NumbersGrouped, updatedLine, currentLine.METARField);
 
@@ -669,6 +669,56 @@ namespace ATISPlugin
             added |= CheckTimedModes(utcNow);
 
             return added;
+        }
+
+        // A frequency picked by hand for the Zulu ATIS contact. Null or empty picks from the airport's contacts.
+        public string ZuluFrequency { get; set; }
+
+        // The "STATION FREQ" the Zulu ATIS was last given from the airport's contacts, null for the placeholders.
+        public string ZuluContact { get; set; }
+
+        // Every contact given this session, to find the one in the text after a suggestion is cancelled.
+        public HashSet<string> ZuluContactsGiven { get; } = new HashSet<string>();
+
+        // Suggests a new contact for the Zulu ATIS when a better station in the airport's list logs on, or the one
+        // in use logs off. The wording around it is kept, including any edits. Not while a frequency is picked by hand.
+        public bool CheckZuluContact()
+        {
+            if (ICAO == null || !IsZulu || !string.IsNullOrWhiteSpace(ZuluFrequency)) return false;
+
+            var info = Zulu.GetInfo(ICAO);
+
+            if (info?.Contacts == null || !info.Contacts.Any()) return false;
+
+            var contact = Zulu.FindContact(info);
+
+            if (contact == ZuluContact) return false;
+
+            var line = Lines.FirstOrDefault(x => x.Name == "ZULU");
+
+            if (line == null) return false;
+
+            var current = SuggestedLines.FirstOrDefault(x => x.Name == line.Name)?.Value ?? line.Value ?? string.Empty;
+
+            // The contact in the text now: the last one given, or an earlier one if that suggestion was cancelled.
+            var previous = new[] { ZuluContact, Zulu.ContactPlaceholder }.Concat(ZuluContactsGiven)
+                .FirstOrDefault(x => x != null && current.Contains(x));
+
+            var value = previous != null
+                ? current.Replace(previous, contact ?? Zulu.ContactPlaceholder)
+                : Zulu.Fill(info.Text, contact);
+
+            ZuluContact = contact;
+
+            if (contact != null) ZuluContactsGiven.Add(contact);
+
+            SuggestedLines.RemoveAll(x => x.Name == line.Name);
+
+            SuggestedLines.Add(new ATISLine(line.Name, 0, line.Type, line.NameSpoken, line.NumbersGrouped, value, line.METARField));
+
+            SuggestionsVersion++;
+
+            return true;
         }
 
         // The runway mode suggested by CheckTimedModes, with its fields in SuggestedLines, until saved or cancelled.
