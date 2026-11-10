@@ -17,27 +17,27 @@ namespace ATISPlugin
                 return zuluInfos.First();
             }
 
+            var now = DateTime.UtcNow.TimeOfDay;
+
             foreach (var zulu in zuluInfos)
             {
-                if (zulu.StartUtc.Length != 4 || zulu.EndUtc.Length != 4) continue;
+                if (!TryParseTime(zulu.StartUtc, out var start) || !TryParseTime(zulu.EndUtc, out var end)) continue;
 
-                var startHour = zulu.StartUtc.Substring(0, 2);
-                var startMinute = zulu.StartUtc.Substring(2, 2);
-                var endHour = zulu.EndUtc.Substring(0, 2);
-                var endMinute = zulu.EndUtc.Substring(2, 2);
+                // The end time covers its whole minute, so 1259 runs until 1300 and 2359 until midnight.
+                end += TimeSpan.FromMinutes(1);
 
-                var startOk = DateTime.TryParseExact($"{DateTime.UtcNow:yyyy-MM-dd} {startHour}:{startMinute}", "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime startUtc);
-                var endOk = DateTime.TryParseExact($"{DateTime.UtcNow:yyyy-MM-dd} {endHour}:{endMinute}", "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime endUtc);
+                var inWindow = start <= end ? now >= start && now < end : now >= start || now < end;
 
-                if (!startOk || !endOk) continue;
-
-                if (DateTime.UtcNow >= startUtc && DateTime.UtcNow <= endUtc)
-                {
-                    return zulu;
-                }
+                if (inWindow) return zulu;
             }
 
-            return null;
+            // An entry without times applies whenever none of the timed ones do.
+            return zuluInfos.FirstOrDefault(x => string.IsNullOrWhiteSpace(x.StartUtc) && string.IsNullOrWhiteSpace(x.EndUtc));
+        }
+
+        private static bool TryParseTime(string hhmm, out TimeSpan time)
+        {
+            return TimeSpan.TryParseExact(hhmm ?? string.Empty, "hhmm", CultureInfo.InvariantCulture, out time);
         }
     }
 }

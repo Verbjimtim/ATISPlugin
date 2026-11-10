@@ -22,6 +22,8 @@ namespace ATISPlugin
         private int Index => Number - 1;
         private string Callsign { get; set; }
         public char ID { get; set; } = 'Z';
+        public string Mode { get; set; }
+        public bool ModeAutoSelected { get; set; }
         public bool IsZulu { get; set; }
         public string ICAO { get; set; }
         private Coordinate VisPoint { get; set; }
@@ -40,6 +42,8 @@ namespace ATISPlugin
         private MemoryStream ATISStream;
         public List<ATISLine> SuggestedLines { get; set; } = new List<ATISLine>();
         public bool HasUpdates => SuggestedLines.Any();
+        // Goes up each time new suggestions arrive (a METAR or a timed update), so the editor knows to apply them.
+        public int SuggestionsVersion { get; private set; }
         public SpeechSynthesizer SpeechSynth { get; set; }
         private PromptBuilder ATISSpoken { get; set; }
         private SpeechAudioFormatInfo SpeechFormat { get; set; }
@@ -236,7 +240,14 @@ namespace ATISPlugin
             if (Network.GetATISConnected(Index)) Network.DisconnectATIS(Index);
 
             ICAO = null;
-            ID = 'Z'; 
+            ID = 'Z';
+            Mode = null;
+            PrecipitationLastSeenUtc = null;
+            ModeAutoSelected = false;
+            TimedSuggestionsMade.Clear();
+            RunwayChangeAlerted = null;
+            SuggestedMode = null;
+            TimedModesInPeriod = null;
             FrequencyDisplay = null;
             Frequency = 0;
             AliasFrequency = 0;
@@ -281,6 +292,10 @@ namespace ATISPlugin
                 line.Changed = false;
             }
 
+            var surfaceLine = Lines.FirstOrDefault(x => x.Name == SurfaceCondition.Field);
+
+            var wasDry = surfaceLine?.Value == SurfaceCondition.Dry;
+
             foreach (var item in items)
             {
                 var line = Lines.FirstOrDefault(x => x.Name == item.Key);
@@ -294,7 +309,13 @@ namespace ATISPlugin
                 line.Changed = true;
             }
 
+            UpdateSurfaceConditionTracking(surfaceLine, wasDry);
+
             SuggestedLines.Clear();
+
+            SuggestedMode = null;
+
+            TimedSuggestionsMade.Clear();
 
             if (VoiceName != Plugin.ManualVoiceName)
             {
@@ -477,19 +498,30 @@ namespace ATISPlugin
 
         public void SuggestionsCancel()
         {
-            METARRaw = METARLastRaw;
+            // Forget the METAR whose suggestions are being dropped, so they're suggested again the next time it arrives.
+            if (SuggestedLines.Any(x => x.METARField != METARField.None)) METARRaw = METARLastRaw;
+
             SuggestedLines.Clear();
+
+            SuggestedMode = null;
         }
+
+        // Set by Load METAR, so the next METAR is applied even if it's the one already loaded.
+        public bool ForceMetarUpdate { get; set; }
 
         public bool UpdateMetar(string metar)
         {
             if (ICAO == null) return false;
 
-            if (metar == METARRaw) return false;
+            var force = ForceMetarUpdate;
+
+            ForceMetarUpdate = false;
+
+            if (metar == METARRaw && !force) return false;
 
             if (IsZulu && !string.IsNullOrWhiteSpace(METARRaw)) return false;
-            
-            METARLastRaw = METARRaw;
+
+            if (metar != METARRaw) METARLastRaw = METARRaw;
 
             METARRaw = metar;
 
@@ -510,6 +542,9 @@ namespace ATISPlugin
                 if (currentLine == null) continue;
 
                 if (updatedLine == currentLine.Value) continue;
+
+                // The WIND field may carry crosswind and tailwind components added by the editor.
+                if (type == METARField.Wind && updatedLine == Wind.StripComponents(currentLine.Value)) continue;
 
                 var suggestLine = new ATISLine(currentLine.Name, 0, currentLine.Type, currentLine.NameSpoken, currentLine.NumbersGrouped, updatedLine, currentLine.METARField);
 
@@ -554,9 +589,171 @@ namespace ATISPlugin
                 }
             }
 
-            SuggestedLines = suggestedLines;
+            if (SurfaceCondition.FromWeather(updatedLines.Weather) != null) PrecipitationLastSeenUtc = DateTime.UtcNow;
 
-            if (!SuggestedLines.Any()) return false;
+            // Keep any timed suggestions (SFC COND, SIGWX), as they don't come from the METAR.
+            SuggestedLines = SuggestedLines.Where(x => x.METARField == METARField.None).Concat(suggestedLines).ToList();
+
+            if (!suggestedLines.Any()) return false;
+
+            SuggestionsVersion++;
+
+            return true;
+        }
+
+        // When precipitation was last reported, for clearing SFC COND.
+        public DateTime? PrecipitationLastSeenUtc { get; set; }
+
+        private readonly HashSet<string> TimedSuggestionsMade = new HashSet<string>();
+
+        private void UpdateSurfaceConditionTracking(ATISLine surfaceLine, bool wasDry)
+        {
+            if (surfaceLine == null) return;
+
+            // DRY goes out on one ATIS only, then the field is cleared.
+            if (wasDry && !surfaceLine.Changed)
+            {
+                surfaceLine.Value = string.Empty;
+                surfaceLine.Changed = true;
+            }
+
+            var weatherLine = Lines.FirstOrDefault(x => x.METARField == METARField.Weather);
+
+            if (SurfaceCondition.Rank(surfaceLine.Value) == 0)
+            {
+                PrecipitationLastSeenUtc = null;
+            }
+            else if (surfaceLine.Changed || SurfaceCondition.FromWeather(weatherLine?.Value) != null)
+            {
+                // Newly reported (even if set by hand), or still precipitating.
+                PrecipitationLastSeenUtc = DateTime.UtcNow;
+            }
+        }
+
+        // Suggests time based changes: SFC COND to DRY once the condition has had time to clear, and removing
+        // windshear reported over an hour ago from SIGWX. Each is suggested once until the next save.
+        // Also true (to open the editor) when an OPR INFO runway change FM time is reached.
+        public bool CheckTimedUpdates(DateTime utcNow)
+        {
+            if (ICAO == null || IsZulu) return false;
+
+            var added = false;
+
+            var surfaceLine = Lines.FirstOrDefault(x => x.Name == SurfaceCondition.Field);
+            var weatherLine = Lines.FirstOrDefault(x => x.METARField == METARField.Weather);
+
+            if (SurfaceCondition.FromWeather(weatherLine?.Value) != null) PrecipitationLastSeenUtc = utcNow;
+
+            var clearAfter = SurfaceCondition.ClearAfter(surfaceLine?.Value);
+
+            if (clearAfter != null && PrecipitationLastSeenUtc != null && utcNow - PrecipitationLastSeenUtc.Value >= clearAfter.Value)
+            {
+                added |= SuggestTimed(surfaceLine, SurfaceCondition.Dry);
+            }
+
+            var windshearLine = Lines.FirstOrDefault(x => x.Name == Windshear.Field);
+
+            var windshear = windshearLine == null ? null : Windshear.RemoveExpired(windshearLine.Value, utcNow);
+
+            if (windshear != null) added |= SuggestTimed(windshearLine, windshear);
+
+            // Alerts once when an OPR INFO FM time is reached, and again only for a different time.
+            var runwayChangeLine = Lines.FirstOrDefault(x => x.Name == RunwayChange.Field);
+
+            var reached = RunwayChange.Reached(runwayChangeLine?.Value, utcNow);
+
+            if (reached != null && reached != RunwayChangeAlerted) added = true;
+
+            RunwayChangeAlerted = reached;
+
+            added |= CheckTimedModes(utcNow);
+
+            return added;
+        }
+
+        // The runway mode suggested by CheckTimedModes, with its fields in SuggestedLines, until saved or cancelled.
+        public string SuggestedMode { get; set; }
+
+        // The timed modes (curfew, RRO) within their hours at the last check, to spot hours starting and ending.
+        private string TimedModesInPeriod { get; set; }
+
+        // When a timed mode's hours start or end, suggests the best mode for the time and weather, if that's a
+        // change to or from a timed mode (e.g. into curfew at 2300, and back out at 0600).
+        private bool CheckTimedModes(DateTime utcNow)
+        {
+            var presetAirport = Plugin.Presets?.GetAirport(ICAO);
+
+            if (presetAirport == null) return false;
+
+            var modes = presetAirport.GetModes(EditorWindow.RunwayNames(Airspace2.GetAirport(ICAO)));
+
+            var timeZone = presetAirport.GetTimeZone();
+
+            var inPeriod = string.Join(",", modes.Where(x => x.InPeriod(utcNow, timeZone)).Select(x => x.Name));
+
+            var previous = TimedModesInPeriod;
+
+            TimedModesInPeriod = inPeriod;
+
+            // The first check only records the hours; the mode picked on creation already allows for them.
+            if (previous == null || previous == inPeriod) return false;
+
+            var surfaceLine = Lines.FirstOrDefault(x => x.Name == SurfaceCondition.Field);
+
+            var conditions = RunwaySelection.FromMetar(METARRaw, SurfaceCondition.Rank(surfaceLine?.Value) > 0);
+
+            conditions.UtcNow = utcNow;
+            conditions.TimeZone = timeZone;
+
+            var best = RunwaySelection.Best(modes, conditions, runway => EditorWindow.RunwayHeading(ICAO, runway));
+
+            if (best == null || best.Name == Mode) return false;
+
+            var current = modes.FirstOrDefault(x => x.Name == Mode);
+
+            var toTimed = best.InPeriod(utcNow, timeZone);
+            var fromTimed = current != null && current.IsTimed && !current.InPeriod(utcNow, timeZone);
+
+            if (!toTimed && !fromTimed) return false;
+
+            foreach (var field in best.Fields)
+            {
+                var line = Lines.FirstOrDefault(x => x.Name == field.Name);
+
+                if (line == null) continue;
+
+                SuggestedLines.RemoveAll(x => x.Name == line.Name);
+
+                var value = PresetAirport.Clean(field.Value);
+
+                if ((line.Value ?? string.Empty) == value) continue;
+
+                SuggestedLines.Add(new ATISLine(line.Name, 0, line.Type, line.NameSpoken, line.NumbersGrouped, value, line.METARField));
+            }
+
+            SuggestedMode = best.Name;
+
+            SuggestionsVersion++;
+
+            return true;
+        }
+
+        // The OPR INFO FM time last alerted, while it's still the reached one.
+        private string RunwayChangeAlerted { get; set; }
+
+        private bool SuggestTimed(ATISLine line, string value)
+        {
+            var key = $"{line.Name}={value}";
+
+            if (TimedSuggestionsMade.Contains(key)) return false;
+
+            TimedSuggestionsMade.Add(key);
+
+            SuggestedLines.RemoveAll(x => x.Name == line.Name);
+
+            SuggestedLines.Add(new ATISLine(line.Name, 0, line.Type, line.NameSpoken, line.NumbersGrouped, value, line.METARField));
+
+            SuggestionsVersion++;
 
             return true;
         }
