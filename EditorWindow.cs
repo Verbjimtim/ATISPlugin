@@ -826,6 +826,62 @@ namespace ATISPlugin
             RefreshForm_Presets();
 
             AutoSelectMode();
+
+            OfferSavedATIS();
+        }
+
+        private bool OfferingSavedATIS { get; set; }
+
+        // Once the airport's saved ATIS has loaded, asks whether to broadcast it or start fresh. After the refresh
+        // that found it, so the window isn't opened from inside a refresh.
+        private void OfferSavedATIS()
+        {
+            if (OfferingSavedATIS || Control.OfferedSaved == null || !IsHandleCreated) return;
+
+            OfferingSavedATIS = true;
+
+            var control = Control;
+
+            BeginInvoke(new Action(() => Safely("offer the saved ATIS", () =>
+            {
+                try
+                {
+                    var saved = control.OfferedSaved;
+
+                    // Deleted, or switched to another ATIS, in the meantime.
+                    if (saved == null || control != Control) return;
+
+                    var utcNow = DateTime.UtcNow;
+
+                    if (!control.CanOffer(saved, utcNow))
+                    {
+                        control.StartFresh(null);
+
+                        return;
+                    }
+
+                    using (var window = new StartWindow(saved, utcNow))
+                    {
+                        if (Visible) window.ShowDialog(this);
+                        else
+                        {
+                            window.StartPosition = FormStartPosition.CenterScreen;
+
+                            window.ShowDialog();
+                        }
+
+                        // Deleted while the window was open.
+                        if (control.OfferedSaved != saved) return;
+
+                        if (window.Result == StartWindow.Choice.Broadcast) control.BroadcastSaved(saved);
+                        else control.StartFresh(saved);
+                    }
+                }
+                finally
+                {
+                    OfferingSavedATIS = false;
+                }
+            })));
         }
 
         private int DrawingPaused { get; set; }

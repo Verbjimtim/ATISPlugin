@@ -260,6 +260,7 @@ namespace ATISPlugin
             ZuluContactsGiven.Clear();
             SavedATISRequest++;
             SavedATISPending = false;
+            OfferedSaved = null;
             SavedLetter = null;
             HasSaved = false;
             LetterBroadcast = false;
@@ -533,8 +534,54 @@ namespace ATISPlugin
         // Counts requests for the saved ATIS, so one that comes back after the ATIS was deleted is ignored.
         private int SavedATISRequest { get; set; }
 
-        // True while the saved ATIS is being fetched, so the runway mode isn't picked from the weather first.
+        // True while the saved ATIS is being fetched or offered, so the runway mode isn't picked from the weather first.
         public bool SavedATISPending { get; private set; }
+
+        // The saved ATIS waiting for the controller to choose between broadcasting it and starting fresh.
+        public SavedATIS OfferedSaved { get; private set; }
+
+        public bool CanOffer(SavedATIS saved, DateTime utcNow) =>
+            saved != null && ICAO != null && !IsZulu && !HasSaved &&
+            string.Equals(saved.ICAO, ICAO, StringComparison.OrdinalIgnoreCase) && saved.IsCurrent(utcNow) && saved.IsUsable;
+
+        // Broadcasts the saved ATIS as it was, carrying on from it.
+        public void BroadcastSaved(SavedATIS saved)
+        {
+            EndOffer();
+
+            ApplySavedATIS(saved, DateTime.UtcNow);
+
+            StatusChanged?.Invoke(this, null);
+        }
+
+        // Starts a new ATIS with the letter after the saved one, as with no saved ATIS: the runway mode is picked
+        // from the weather and nothing goes live until the controller broadcasts.
+        public void StartFresh(SavedATIS saved)
+        {
+            EndOffer();
+
+            if (saved != null && CanOffer(saved, DateTime.UtcNow))
+            {
+                if (saved.Letter != null)
+                {
+                    // The editor offers the letter after the saved one.
+                    ID = saved.Letter.Value;
+
+                    SavedLetter = saved.Letter;
+                }
+
+                SuggestionsVersion++;
+            }
+
+            StatusChanged?.Invoke(this, null);
+        }
+
+        private void EndOffer()
+        {
+            OfferedSaved = null;
+
+            SavedATISPending = false;
+        }
 
         // The letter of the saved ATIS being carried on from, for the editor to give the next one. Null otherwise.
         public char? SavedLetter { get; set; }
@@ -557,9 +604,10 @@ namespace ATISPlugin
                     {
                         if (request != SavedATISRequest) return;
 
-                        SavedATISPending = false;
-
-                        ApplySavedATIS(saved, DateTime.UtcNow);
+                        // Offered to the controller, who broadcasts it or starts fresh. Until they choose, the
+                        // runway mode isn't picked from the weather. With nothing to offer, the ATIS starts fresh.
+                        if (CanOffer(saved, DateTime.UtcNow)) OfferedSaved = saved;
+                        else SavedATISPending = false;
 
                         StatusChanged?.Invoke(this, null);
                     }
@@ -649,7 +697,7 @@ namespace ATISPlugin
             return added;
         }
 
-        // Puts the saved ATIS live, unchanged, until the controller saves their first. Cancelling the suggestions
+        // Puts the saved ATIS live, unchanged, when the controller chooses to broadcast it. Cancelling the suggestions
         // then leaves it live. With a manual recording there's no audio for it, so only its text is published.
         private void PublishSavedATIS()
         {
