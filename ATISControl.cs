@@ -541,7 +541,7 @@ namespace ATISPlugin
         public SavedATIS OfferedSaved { get; private set; }
 
         public bool CanOffer(SavedATIS saved, DateTime utcNow) =>
-            saved != null && ICAO != null && !IsZulu && !HasSaved &&
+            saved != null && SavedATIS.Available && ICAO != null && !IsZulu && !HasSaved &&
             string.Equals(saved.ICAO, ICAO, StringComparison.OrdinalIgnoreCase) && saved.IsCurrent(utcNow) && saved.IsUsable;
 
         // Broadcasts the saved ATIS as it was, carrying on from it.

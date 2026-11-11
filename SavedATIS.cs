@@ -41,10 +41,15 @@ namespace ATISPlugin
         // A field's saved value, or empty when the section is blank or missing.
         public string Get(string field) => Content.TryGetValue(field, out var value) ? value ?? string.Empty : string.Empty;
 
-        // Null when there's no saved ATIS, or the API can't be reached in time.
+        // ozserver holds the live network's ATISs, so off it (on Sweatbox, a local server or a LAN) nothing is read
+        // from or sent to it: a training session mustn't be offered a real ATIS, or leave its own behind. Anything
+        // added here that sends to ozserver has to check this too.
+        public static bool Available => Plugin.OnLiveNetwork;
+
+        // Null when there's no saved ATIS, the API can't be reached in time, or it isn't available off the live network.
         public static async Task<SavedATIS> Get(string icao, CancellationToken cancel = default)
         {
-            if (string.IsNullOrWhiteSpace(icao)) return null;
+            if (string.IsNullOrWhiteSpace(icao) || !Available) return null;
 
             try
             {
