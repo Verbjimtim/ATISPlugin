@@ -75,6 +75,9 @@ namespace ATISPlugin
         public bool CanRecord => Edits == false && Control.Broadcasting == false ? true : false;
         private bool Initialized { get; set; }
 
+        // Type-to-search over the airport drop-down.
+        private AirportSearch AirportSearch { get; }
+
         public EditorWindow()
         {
             InitializeComponent();
@@ -91,6 +94,8 @@ namespace ATISPlugin
             ComboBoxAirport.ForeColor = Colours.GetColour(Colours.Identities.InteractiveText);
             ComboBoxAirport.FocusColor = Colours.GetColour(Colours.Identities.HighlightedText);
             ComboBoxAirport.Font = MMI.eurofont_winsml;
+
+            AirportSearch = new AirportSearch(ComboBoxAirport);
 
             ComboBoxLetter.BackColor = Colours.GetColour(Colours.Identities.WindowBackground);
             ComboBoxLetter.ForeColor = Colours.GetColour(Colours.Identities.InteractiveText);
@@ -782,6 +787,9 @@ namespace ATISPlugin
 
                 if (ComboBoxAirport.SelectedIndex != index) ComboBoxAirport.SelectedIndex = ComboBoxAirport.Items.IndexOf(DisplayName);
             }
+
+            // The items are reloaded on switching ATIS, which may leave the selected index unchanged.
+            AirportSearch.ShowSelected();
 
             ComboBoxLetter.SelectedIndex = ComboBoxLetter.Items.IndexOf(ID.ToString());
 
