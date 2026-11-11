@@ -186,7 +186,9 @@ namespace ATISPlugin
 
             try
             {
-                var exists = Network.GetOnlineATCs.FirstOrDefault(x => x.Callsign == $"{icao}_ATIS");
+                // Only catches one already listed: the list fills over the first minute online, and leaves out ATCs out of
+                // range. WatchConnection catches the rest when the network refuses the connection.
+                var exists = Network.GetOnlineATCs.FirstOrDefault(x => string.Equals(x.Callsign, $"{icao}_ATIS", StringComparison.OrdinalIgnoreCase));
 
                 if (exists != null)
                 {
@@ -216,6 +218,8 @@ namespace ATISPlugin
 
                 Network.ConnectATIS(Index, Callsign, ICAO, FSDFrequency, VisPoint);
 
+                WatchConnection(Callsign);
+
                 LoadSavedATIS(icao);
             }
             catch (Exception ex)
@@ -234,8 +238,76 @@ namespace ATISPlugin
             StatusChanged?.Invoke(this, null);
         }
 
+        // How long the network gets to accept a new ATIS connection, and how often it's checked.
+        private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(20);
+        private static readonly TimeSpan ConnectionCheckInterval = TimeSpan.FromSeconds(2);
+
+        // Within this long of connecting, a dropped connection was most likely refused rather than lost.
+        private static readonly TimeSpan RefusedWithin = TimeSpan.FromSeconds(30);
+
+        private int ConnectionWatch;
+
+        // vatSys drops an ATIS connection without a word when the network refuses it, as it does when the callsign
+        // is already online, or kills it later. Left alone the ATIS looks live in the editor while nothing is on
+        // the network, so it's deleted with an error saying why. Runs on the GUI thread, from Create.
+        private async void WatchConnection(string callsign)
+        {
+            var watch = ++ConnectionWatch;
+
+            var started = DateTime.UtcNow;
+
+            DateTime? connectedUtc = null;
+
+            try
+            {
+                while (true)
+                {
+                    await Task.Delay(ConnectionCheckInterval);
+
+                    // Deleted, replaced, or the controller's own connection went (which deletes it anyway).
+                    if (watch != ConnectionWatch || Callsign != callsign || !Network.IsConnected) return;
+
+                    if (Network.GetATISConnected(Index))
+                    {
+                        if (connectedUtc == null) connectedUtc = DateTime.UtcNow;
+
+                        continue;
+                    }
+
+                    string message;
+
+                    if (connectedUtc == null)
+                    {
+                        if (DateTime.UtcNow - started < ConnectTimeout) continue;
+
+                        message = $"Could not connect {callsign} to the network. Check it isn't already online.";
+                    }
+                    else if (DateTime.UtcNow - connectedUtc.Value < RefusedWithin)
+                    {
+                        message = $"The network refused {callsign}. It's most likely already online.";
+                    }
+                    else
+                    {
+                        message = $"{callsign} lost its network connection.";
+                    }
+
+                    Errors.Add(new Exception(message), Plugin.DisplayName);
+
+                    await Delete();
+
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not check the ATIS connection: {ex.Message}"), Plugin.DisplayName);
+            }
+        }
+
         public async Task Delete()
         {
+            ConnectionWatch++;
+
             await BroadcastStop();
 
             if (Network.GetATISConnected(Index)) Network.DisconnectATIS(Index);
