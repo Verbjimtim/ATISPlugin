@@ -169,6 +169,36 @@ namespace ATISPlugin
 
             return output;
         }
+
+        // The largest of each component anywhere in the direction range, at gust strength. A range can bring the
+        // wind across from both sides, so each side is kept.
+        public WindExtremes Max(double runwayHeading)
+        {
+            var output = new WindExtremes();
+
+            foreach (var direction in Directions())
+            {
+                var angle = (direction - runwayHeading) * Math.PI / 180.0;
+
+                var across = MaxSpeed * Math.Sin(angle);
+                var along = MaxSpeed * Math.Cos(angle);
+
+                output.RightCrosswind = Math.Max(output.RightCrosswind, across);
+                output.LeftCrosswind = Math.Max(output.LeftCrosswind, -across);
+                output.Headwind = Math.Max(output.Headwind, along);
+                output.Tailwind = Math.Max(output.Tailwind, -along);
+            }
+
+            return output;
+        }
+    }
+
+    public class WindExtremes
+    {
+        public double LeftCrosswind { get; set; }
+        public double RightCrosswind { get; set; }
+        public double Headwind { get; set; }
+        public double Tailwind { get; set; }
     }
 
     public class WindComponents

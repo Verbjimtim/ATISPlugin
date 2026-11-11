@@ -2674,18 +2674,24 @@ namespace ATISPlugin
 
             if (parsed.MaxSpeed == 0) return "CALM";
 
-            // Worst case across any direction range, at gust strength.
-            var components = parsed.Worst(rwyHeading);
+            // The most of each anywhere in the direction range, at gust strength; marked Max when the wind varies.
+            var max = parsed.Max(rwyHeading);
 
-            var crosswind = Math.Round(Math.Abs(components.Crosswind));
+            var text = Components(Math.Round(max.Headwind), Math.Round(max.Tailwind), Math.Round(max.RightCrosswind), Math.Round(max.LeftCrosswind));
 
-            var tailwind = Math.Round(components.Tailwind);
+            return parsed.IsVariable || parsed.IsGusting ? $"Max {(text.Length > 0 ? text : "Nil")}" : text;
+        }
 
-            var headwind = Math.Round(components.Headwind);
-
+        // E.g. "3kt Tailwind, 12kt Left / 10kt Right Crosswind", in whole knots. Any tailwind is shown rather than
+        // the headwind, and both crosswinds when the wind can come from either side.
+        private static string Components(double headwind, double tailwind, double right, double left)
+        {
             var along = tailwind > 0 ? $"{tailwind:F0}kt Tailwind" : headwind > 0 ? $"{headwind:F0}kt Headwind" : string.Empty;
 
-            var across = crosswind > 0 ? $"{crosswind:F0}kt {(components.Crosswind > 0 ? "Right" : "Left")} Crosswind" : string.Empty;
+            var across = right > 0 && left > 0 ? $"{left:F0}kt Left / {right:F0}kt Right Crosswind"
+                : right > 0 ? $"{right:F0}kt Right Crosswind"
+                : left > 0 ? $"{left:F0}kt Left Crosswind"
+                : string.Empty;
 
             return string.Join(", ", new[] { along, across }.Where(x => !string.IsNullOrEmpty(x)));
         }
