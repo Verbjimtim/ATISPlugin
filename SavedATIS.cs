@@ -51,18 +51,35 @@ namespace ATISPlugin
         {
             if (string.IsNullOrWhiteSpace(icao) || !Available) return null;
 
+            // However ozserver fails (refused, unresolvable, hanging, an error, junk), there's simply no saved ATIS.
+            // The request runs off the calling thread, which is the GUI's: the framework resolves the host before
+            // the timeout applies, so a dead DNS would otherwise freeze vatSys. And it's given up on at the timeout
+            // whatever it's stuck on. Fetch catches everything itself, so one left running can't fault unobserved.
             try
             {
-                using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel))
+                var timeout = new CancellationTokenSource(Timeout);
+
+                var request = Task.Run(() => Fetch(icao, CancellationTokenSource.CreateLinkedTokenSource(cancel, timeout.Token).Token));
+
+                var done = await Task.WhenAny(request, Task.Delay(Timeout, cancel)).ConfigureAwait(false);
+
+                return done == request ? await request.ConfigureAwait(false) : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static async Task<SavedATIS> Fetch(string icao, CancellationToken cancel)
+        {
+            try
+            {
+                using (var response = await Client.GetAsync(Url + Uri.EscapeDataString(icao), cancel).ConfigureAwait(false))
                 {
-                    timeout.CancelAfter(Timeout);
+                    if (!response.IsSuccessStatusCode) return null;
 
-                    using (var response = await Client.GetAsync(Url + Uri.EscapeDataString(icao), timeout.Token).ConfigureAwait(false))
-                    {
-                        if (!response.IsSuccessStatusCode) return null;
-
-                        return Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false), icao);
-                    }
+                    return Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false), icao);
                 }
             }
             catch
