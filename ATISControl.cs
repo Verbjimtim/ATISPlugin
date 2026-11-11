@@ -215,6 +215,8 @@ namespace ATISPlugin
                 }
 
                 Network.ConnectATIS(Index, Callsign, ICAO, FSDFrequency, VisPoint);
+
+                LoadSavedATIS(icao);
             }
             catch (Exception ex)
             {
@@ -256,6 +258,11 @@ namespace ATISPlugin
             ZuluFrequency = null;
             ZuluContact = null;
             ZuluContactsGiven.Clear();
+            SavedATISRequest++;
+            SavedATISPending = false;
+            SavedLetter = null;
+            HasSaved = false;
+            LetterBroadcast = false;
 
             METARRaw = null;
 
@@ -285,8 +292,14 @@ namespace ATISPlugin
             await BroadcastStop();
 
             DateTimeUtc = DateTime.UtcNow;
+
+            // Saved again with the same letter (not broadcast in between), it still hasn't gone out.
+            if (id != ID) LetterBroadcast = false;
+
             ID = id;
             TimeCheck = timeCheck;
+            HasSaved = true;
+            SavedLetter = null;
 
             foreach (var line in Lines)
             {
@@ -370,6 +383,8 @@ namespace ATISPlugin
                 Broadcasting = true;
 
                 Network.UpdateATIS(Index, ID, GetInfo());
+
+                LetterBroadcast = true;
 
                 BroadcastAudio();
             }
@@ -505,6 +520,180 @@ namespace ATISPlugin
             SuggestedLines.Clear();
 
             SuggestedMode = null;
+
+            SavedLetter = null;
+        }
+
+        // Whether the ATIS with the current letter has been broadcast, after which an edit gives a new letter.
+        public bool LetterBroadcast { get; private set; }
+
+        // Whether this ATIS has been saved since it was created, after which a saved ATIS is no longer offered.
+        private bool HasSaved { get; set; }
+
+        // Counts requests for the saved ATIS, so one that comes back after the ATIS was deleted is ignored.
+        private int SavedATISRequest { get; set; }
+
+        // True while the saved ATIS is being fetched, so the runway mode isn't picked from the weather first.
+        public bool SavedATISPending { get; private set; }
+
+        // The letter of the saved ATIS being carried on from, for the editor to give the next one. Null otherwise.
+        public char? SavedLetter { get; set; }
+
+        // Fetches the airport's saved ATIS in the background, then offers it on the GUI thread. A slow or missing
+        // API leaves the ATIS as it would be without one.
+        private async void LoadSavedATIS(string icao)
+        {
+            try
+            {
+                var request = ++SavedATISRequest;
+
+                SavedATISPending = true;
+
+                var saved = await SavedATIS.Get(icao);
+
+                MMI.InvokeOnGUI(delegate ()
+                {
+                    try
+                    {
+                        if (request != SavedATISRequest) return;
+
+                        SavedATISPending = false;
+
+                        ApplySavedATIS(saved, DateTime.UtcNow);
+
+                        StatusChanged?.Invoke(this, null);
+                    }
+                    catch (Exception ex)
+                    {
+                        Errors.Add(new Exception($"Could not load the saved ATIS: {ex.Message}"), Plugin.DisplayName);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                SavedATISPending = false;
+
+                Errors.Add(new Exception($"Could not load the saved ATIS: {ex.Message}"), Plugin.DisplayName);
+            }
+        }
+
+        // Takes the airport's saved ATIS as the previous version of this one: its fields become the ATIS as it
+        // stands, so only what differs is suggested and, once saved, marked as changed (+). The METAR is compared
+        // against it as usual, suggesting the weather that has changed since. Also gives the runway mode the saved
+        // fields match and the next letter. Only for a new ATIS that hasn't been saved yet.
+        public bool ApplySavedATIS(SavedATIS saved, DateTime utcNow)
+        {
+            if (saved == null || ICAO == null || IsZulu || HasSaved) return false;
+
+            if (!string.Equals(saved.ICAO, ICAO, StringComparison.OrdinalIgnoreCase) || !saved.IsCurrent(utcNow) || !saved.IsUsable) return false;
+
+            var added = false;
+
+            foreach (var line in Lines)
+            {
+                if (line.Name == "ZULU" || !saved.Content.ContainsKey(line.Name)) continue;
+
+                line.Value = saved.Get(line.Name);
+
+                // Published with the same + marks as the saved ATIS, so it goes out exactly as it was.
+                line.Changed = saved.Changed.Contains(line.Name);
+
+                added = true;
+            }
+
+            // A METAR that arrived first was compared with an empty ATIS, so it's compared again with the saved one.
+            if (added && !string.IsNullOrWhiteSpace(METARRaw))
+            {
+                SuggestedLines.RemoveAll(x => x.METARField != METARField.None);
+
+                ForceMetarUpdate = true;
+
+                UpdateMetar(METARRaw);
+            }
+
+            var mode = SavedMode(saved);
+
+            if (mode != null)
+            {
+                // The saved ATIS's mode, so MODE isn't flagged as a change to save.
+                Mode = mode;
+
+                SuggestedMode = mode;
+
+                added = true;
+            }
+
+            // Carrying on from the saved ATIS stands in for picking a mode from the weather, which would replace
+            // the saved runways. With no matching mode, MODE is left blank for the controller to pick.
+            if (added) ModeAutoSelected = true;
+
+            if (saved.Letter != null)
+            {
+                // The saved ATIS's letter is the one live; the editor offers the next for the controller's first.
+                ID = saved.Letter.Value;
+
+                SavedLetter = saved.Letter;
+
+                added = true;
+            }
+
+            if (added)
+            {
+                DateTimeUtc = saved.LastUpdatedUtc ?? utcNow;
+
+                PublishSavedATIS();
+
+                SuggestionsVersion++;
+            }
+
+            return added;
+        }
+
+        // Puts the saved ATIS live, unchanged, until the controller saves their first. Cancelling the suggestions
+        // then leaves it live. With a manual recording there's no audio for it, so only its text is published.
+        private void PublishSavedATIS()
+        {
+            try
+            {
+                if (VoiceName == Plugin.ManualVoiceName || InstalledVoice == null)
+                {
+                    Network.UpdateATIS(Index, ID, GetInfo());
+
+                    LetterBroadcast = true;
+
+                    return;
+                }
+
+                GenerateSpoken();
+
+                ATISStream = new MemoryStream();
+
+                SetContent(ATISSpoken, ref ATISStream);
+
+                GenerateAutoAudio(false);
+
+                BroadcastStart();
+            }
+            catch (Exception ex)
+            {
+                Errors.Add(new Exception($"Could not publish the saved ATIS: {ex.Message}"), Plugin.DisplayName);
+            }
+        }
+
+        // The runway mode whose fields all match the saved ATIS, preferring the one setting the most fields.
+        private string SavedMode(SavedATIS saved)
+        {
+            var presetAirport = Plugin.Presets?.GetAirport(ICAO);
+
+            if (presetAirport == null) return null;
+
+            var modes = presetAirport.GetModes(EditorWindow.RunwayNames(Airspace2.GetAirport(ICAO)));
+
+            return modes
+                .Where(x => x.Fields.Any() && x.Fields.All(f => saved.Content.ContainsKey(f.Name)
+                    && PresetAirport.Clean(saved.Get(f.Name)) == PresetAirport.Clean(f.Value)))
+                .OrderByDescending(x => x.Fields.Count())
+                .FirstOrDefault()?.Name;
         }
 
         // Set by Load METAR, so the next METAR is applied even if it's the one already loaded.
@@ -1154,7 +1343,8 @@ namespace ATISPlugin
             }
         }
 
-        private void GenerateAutoAudio()
+        // listen plays it locally, as after saving.
+        private void GenerateAutoAudio(bool listen = true)
         {
             try
             {
@@ -1169,7 +1359,7 @@ namespace ATISPlugin
                     AudioWav = ms.ToArray();
                 }
 
-                ListenStart();
+                if (listen) ListenStart();
             }
             catch (Exception ex)
             {

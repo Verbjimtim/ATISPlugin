@@ -323,7 +323,9 @@ namespace ATISPlugin
 
             if (line.Name == PresetAirport.ApproachField)
             {
-                if (!(PresetAirport?.DefinesField(PresetAirport.ApproachField) ?? false))
+                // Also when the airport has its own approaches but none for the selected mode (e.g. a single runway
+                // mode, which only sets RWY, or a mode with a blank APCH for visual approaches).
+                if (!(PresetAirport?.DefinesField(PresetAirport.ApproachField) ?? false) || options.All(string.IsNullOrEmpty))
                 {
                     options.AddRange(PresetAirport.DefaultApproaches.Where(x => !options.Contains(x)));
                 }
@@ -1032,6 +1034,9 @@ namespace ATISPlugin
         {
             if (Control.ICAO == null || Control.IsZulu || Control.ModeAutoSelected) return;
 
+            // The saved ATIS may set the mode instead, so wait for it (a few seconds at most).
+            if (Control.SavedATISPending) return;
+
             if (string.IsNullOrWhiteSpace(Control.METARRaw) || !Network.IsConnected) return;
 
             Control.ModeAutoSelected = true;
@@ -1585,6 +1590,18 @@ namespace ATISPlugin
                     Mode = Control.SuggestedMode;
 
                     SetText(TextBoxMode, Mode);
+                }
+
+                // Carrying on from a saved ATIS gives the letter after its one.
+                if (Control.SavedLetter != null)
+                {
+                    ID = Control.SavedLetter.Value;
+
+                    Control.SavedLetter = null;
+
+                    ComboBoxLetter.SelectedIndex = ComboBoxLetter.Items.IndexOf(ID.ToString());
+
+                    IncreaseID();
                 }
 
                 AppliedMetar = Control.METARRaw;
@@ -2235,17 +2252,13 @@ namespace ATISPlugin
 
             Saves.Add(line.Name, textBox.Text);
 
-            if (Edits && ID == Control.ID && !Control.IsZulu)
-            {
-                IncreaseID();
-                ButtonSave.Enabled = true;
-                ButtonCancel.Enabled = true;
-            }
-            else if (Edits && Control.IsZulu)
-            {
-                ButtonSave.Enabled = true;
-                ButtonCancel.Enabled = true;
-            }
+            // A new letter only once the current one has gone out. Edits to a saved ATIS that hasn't been broadcast
+            // (e.g. after listening to it) keep its letter.
+            if (ID == Control.ID && Control.LetterBroadcast && !Control.IsZulu) IncreaseID();
+
+            // Any edit can be saved, whether or not it gave a new letter.
+            ButtonSave.Enabled = true;
+            ButtonCancel.Enabled = true;
 
             if (line.Name.Contains("WIND"))
             {
@@ -2299,6 +2312,8 @@ namespace ATISPlugin
                 }
 
                 ClearUnofferedFields(mode);
+
+                RemoveOtherModesWording(mode);
             }
 
             // The mode may have replaced a field holding an addition, or be a condition for one.
@@ -2308,6 +2323,39 @@ namespace ATISPlugin
             ButtonCancel.Enabled = true;
 
             RefreshForm_Presets();
+        }
+
+        private const string OperationsField = "OPR INFO";
+
+        // A mode that doesn't set OPR INFO (e.g. a single runway mode) removes other modes' OPR INFO wording, such
+        // as INDEPENDENT PARALLEL DEPARTURES IN PROG from a PROPS mode, which only applies with that mode. However
+        // it got there (the previous mode, an earlier save, or the saved ATIS). Anything else in the field is kept.
+        private void RemoveOtherModesWording(PresetMode mode)
+        {
+            if (mode.Fields.Any(x => x.Name == OperationsField)) return;
+
+            var line = Control.Lines.FirstOrDefault(x => x.Name == OperationsField);
+
+            var textBox = line == null ? null : GetTextBox(line.Number);
+
+            if (textBox == null || string.IsNullOrWhiteSpace(textBox.Text)) return;
+
+            var wordings = Modes.Where(x => x != mode)
+                .SelectMany(x => x.Fields)
+                .Where(x => x.Name == OperationsField)
+                .Select(x => PresetAirport.Clean(x.Value))
+                .Where(x => x.Length > 0)
+                .Distinct()
+                .OrderByDescending(x => x.Length);
+
+            var text = textBox.Text;
+
+            foreach (var wording in wordings)
+            {
+                if (ContainsPreset(text, wording)) text = TogglePreset(text, wording);
+            }
+
+            if (text != textBox.Text) textBox.Text = text;
         }
 
         // A mode that doesn't set a single choice field (e.g. a single runway mode, which only sets RWY) blanks it

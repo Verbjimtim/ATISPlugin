@@ -1,0 +1,167 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+using Newtonsoft.Json.Linq;
+
+namespace ATISPlugin
+{
+    // The last ATIS saved for an airport in VATPAC airspace, from ozserver, so a controller taking over can carry on
+    // from it. Each section of its content is one ATIS field, named as in the editor (RWY, APCH, OPR INFO...).
+    public class SavedATIS
+    {
+        private const string Url = "https://api.ozserver.org/api/v1/vatsim/atis/";
+
+        // Long enough for the API to answer, short enough that a slow one doesn't hold up the runway mode.
+        private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
+
+        // Older than this, the runways and procedures are likely to have changed, so it isn't offered.
+        public static readonly TimeSpan MaxAge = TimeSpan.FromHours(3);
+
+        private static readonly HttpClient Client = new HttpClient();
+
+        public string ICAO { get; private set; }
+        public char? Letter { get; private set; }
+        public Dictionary<string, string> Content { get; private set; } = new Dictionary<string, string>();
+        public DateTime? LastUpdatedUtc { get; private set; }
+
+        // The whole text of a saved Zulu, which has no fields; null for a normal ATIS.
+        public string Text { get; private set; }
+
+        // Fields marked as changed (+) on the saved ATIS, by name.
+        public HashSet<string> Changed { get; private set; } = new HashSet<string>();
+
+        public bool IsCurrent(DateTime utcNow) => LastUpdatedUtc != null && utcNow - LastUpdatedUtc.Value <= MaxAge;
+
+        // A record with no letter or no text (e.g. one left behind with every section null) has nothing to carry on.
+        public bool IsUsable => Letter != null && Content.Values.Any(x => !string.IsNullOrWhiteSpace(x));
+
+        // A field's saved value, or empty when the section is blank or missing.
+        public string Get(string field) => Content.TryGetValue(field, out var value) ? value ?? string.Empty : string.Empty;
+
+        // Null when there's no saved ATIS, or the API can't be reached in time.
+        public static async Task<SavedATIS> Get(string icao, CancellationToken cancel = default)
+        {
+            if (string.IsNullOrWhiteSpace(icao)) return null;
+
+            try
+            {
+                using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel))
+                {
+                    timeout.CancelAfter(Timeout);
+
+                    using (var response = await Client.GetAsync(Url + Uri.EscapeDataString(icao), timeout.Token).ConfigureAwait(false))
+                    {
+                        if (!response.IsSuccessStatusCode) return null;
+
+                        return Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false), icao);
+                    }
+                }
+            }
+            catch
+            {
+                // No saved ATIS to offer; the editor works as it does without one.
+                return null;
+            }
+        }
+
+        // The API answers with a list, empty when nothing is saved for the airport.
+        public static SavedATIS Parse(string json, string icao, DateTime? utcNow = null)
+        {
+            if (!(JToken.Parse(json) is JArray list)) return null;
+
+            var item = list.OfType<JObject>().FirstOrDefault(x => string.Equals((string)x["icao"], icao, StringComparison.OrdinalIgnoreCase));
+
+            if (item == null) return null;
+
+            var output = new SavedATIS { ICAO = icao.ToUpper() };
+
+            var letter = ((string)item["atis_letter"] ?? string.Empty).Trim().ToUpper();
+
+            if (letter.Length == 1 && char.IsLetter(letter[0])) output.Letter = letter[0];
+
+            if (item["content"] is JObject content)
+            {
+                foreach (var section in content.Properties())
+                {
+                    var name = section.Name.Trim().ToUpper();
+
+                    var value = section.Value.Type == JTokenType.Null ? null : section.Value.ToString().Trim().ToUpper();
+
+                    // A section name or value starting with + is marked as changed, as vatSys shows it.
+                    if (name.StartsWith("+")) { name = name.Substring(1).Trim(); output.Changed.Add(name); }
+
+                    if (value != null && value.StartsWith("+")) { value = value.Substring(1).Trim(); output.Changed.Add(name); }
+
+                    output.Content[name] = value;
+                }
+            }
+            else if (item["content"] is JValue text && text.Type == JTokenType.String)
+            {
+                // A Zulu has no fields, only its whole text.
+                output.Text = ((string)text).Trim();
+            }
+
+            // The fields marked as changed, as a list of section names: "changed": ["RWY", "OPR INFO"].
+            if (item["changed"] is JArray changed)
+            {
+                foreach (var name in changed.Select(x => ((string)x ?? string.Empty).Trim().ToUpper()).Where(x => x.Length > 0))
+                {
+                    output.Changed.Add(name);
+                }
+            }
+
+            var updated = item["last_updated"];
+
+            if (updated != null && updated.Type == JTokenType.Date)
+            {
+                output.LastUpdatedUtc = updated.Value<DateTime>().ToUniversalTime();
+            }
+            else if (ParseTimeGroup((string)updated, utcNow ?? DateTime.UtcNow) is DateTime group)
+            {
+                output.LastUpdatedUtc = group;
+            }
+            else if (DateTime.TryParse((string)updated, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed))
+            {
+                output.LastUpdatedUtc = parsed;
+            }
+
+            return output;
+        }
+
+        // A DDHHMMz time group, as on the ATIS ("110750z"), in the latest month it can be in without being ahead of now.
+        public static DateTime? ParseTimeGroup(string value, DateTime utcNow)
+        {
+            value = (value ?? string.Empty).Trim().ToUpper();
+
+            if (value.EndsWith("Z")) value = value.Substring(0, value.Length - 1);
+
+            if (value.Length != 6 || !value.All(char.IsDigit)) return null;
+
+            var day = int.Parse(value.Substring(0, 2));
+            var hour = int.Parse(value.Substring(2, 2));
+            var minute = int.Parse(value.Substring(4, 2));
+
+            if (day < 1 || day > 31 || hour > 23 || minute > 59) return null;
+
+            // A few minutes ahead is clock difference, not last month.
+            var latest = utcNow.AddMinutes(10);
+
+            for (var months = 0; months <= 2; months++)
+            {
+                var month = new DateTime(utcNow.Year, utcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(-months);
+
+                if (day > DateTime.DaysInMonth(month.Year, month.Month)) continue;
+
+                var time = new DateTime(month.Year, month.Month, day, hour, minute, 0, DateTimeKind.Utc);
+
+                if (time <= latest) return time;
+            }
+
+            return null;
+        }
+    }
+}
