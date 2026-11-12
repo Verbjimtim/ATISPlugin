@@ -74,6 +74,9 @@ namespace ATISPlugin
                 return vatSysDatasetPath;
             }
         }
+        // Connected to the live VATSIM network, not Sweatbox, a local server or a LAN.
+        public static bool OnLiveNetwork => Network.IsConnected && Network.IsOfficialServer;
+
         // Tower and below may only operate a single ATIS.
         public static bool SingleATISOnly
         {
@@ -347,7 +350,7 @@ namespace ATISPlugin
                 {
                     while (ToBroadcast.TryDequeue(out var atb))
                     {
-                        if (!Network.IsOfficialServer) continue;
+                        if (!OnLiveNetwork) continue;
 
                         if (!Network.GetATISConnected(atb.ATISIndex)) continue;
 
