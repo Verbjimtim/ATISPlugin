@@ -335,10 +335,10 @@
     <!-- The SOP gives no RWY wording for these modes; it follows the YPPH crossing runway format.
          RRO is last, as it's only suited to noise abatement, which isn't a factor on VATSIM. -->
     <Mode Name="3530A35D" Priority="1">
-      <Field Name="RWY">35 AND RWY 30 FOR ARR. RWY 35 FOR DEP</Field>
+      <Field Name="RWY">35 AND RWY 30 FOR ARR AND DEP</Field>
     </Mode>
     <Mode Name="1712A17D" Priority="2">
-      <Field Name="RWY">17 AND RWY 12 FOR ARR. RWY 17 FOR DEP</Field>
+      <Field Name="RWY">17 AND RWY 12 FOR ARR AND DEP</Field>
     </Mode>
     <Mode Name="17A35D (RRO)" Priority="7">
       <Field Name="RWY">17 FOR ARR. RWY 35 FOR DEP</Field>
