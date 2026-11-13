@@ -9,6 +9,16 @@ namespace ATISPlugin
     [XmlRoot("ATISPresets")]
     public class ATISPresets
     {
+        // The file's format, raised when it uses something an older plugin can't (Format="2" on <ATISPresets>).
+        // Without it, a file is format 1. Older plugins ignore it, and the parts they don't know.
+        //   2  Airport conditions on AutoAdd and Mode.
+        public const int SupportedFormat = 2;
+
+        [XmlAttribute("Format")]
+        public int Format { get; set; }
+
+        public int FileFormat => Format < 1 ? 1 : Format;
+
         [XmlElement("Airport")]
         public List<PresetAirport> Airports { get; set; } = new List<PresetAirport>();
 

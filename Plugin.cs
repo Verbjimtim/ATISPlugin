@@ -236,47 +236,55 @@ namespace ATISPlugin
 
         private ATISControl GetATIS(string icao) => AllATIS.FirstOrDefault(x => x.ICAO == icao);
 
-        // Reads a config file from the profile. If the profile doesn't have it, it's downloaded from the
-        // repository and saved there. A file already in the profile is always used as is.
-        private static async Task<string> GetConfigFile(string fileName)
+        // Reads a config file: the profile's own copy as it is, or the repository's latest, kept in the profile and
+        // updated when the repository's changes (see ConfigFiles). validate says why a download can't be used.
+        private static Task<string> GetConfigFile(string fileName, Func<string, string, string> validate) =>
+            ConfigFiles.Get(fileName, RepositoryUrl, ConfigsPath, DatasetPath != null && Directory.Exists(DatasetPath), validate);
+
+        // Null when the JSON is a list with something in it.
+        private static string ValidateList<T>(string content, string cached) =>
+            JsonConvert.DeserializeObject<T[]>(content)?.Any() == true ? null : "it's empty";
+
+        private static ATISPresets ReadPresets(string content)
         {
-            var profileFileName = fileName.StartsWith("ATIS") ? fileName : "ATIS" + fileName;
+            var serializer = new XmlSerializer(typeof(ATISPresets));
 
-            var path = ConfigsPath == null ? null : Path.Combine(ConfigsPath, profileFileName);
-
-            if (path != null && File.Exists(path)) return File.ReadAllText(path);
-
-            var content = await Client.GetStringAsync($"{RepositoryUrl}/{fileName}");
-
-            try
+            using (var reader = new StringReader(content))
             {
-                // Only save into a profile that exists, rather than creating one.
-                if (path != null && Directory.Exists(DatasetPath))
-                {
-                    Directory.CreateDirectory(ConfigsPath);
-
-                    File.WriteAllText(path, content);
-                }
+                return (ATISPresets)serializer.Deserialize(reader) ?? new ATISPresets();
             }
-            catch (Exception ex)
-            {
-                Errors.Add(new Exception($"Could not save {profileFileName} to the profile: {ex.Message}"), DisplayName);
-            }
-
-            return content;
         }
 
         private static async Task GetPresets()
         {
             try
             {
-                var content = await GetConfigFile(PresetsFile);
-
-                var serializer = new XmlSerializer(typeof(ATISPresets));
-
-                using (var reader = new StringReader(content))
+                // A download is passed over for the copy already here when it's newer than this plugin understands, or
+                // in an older format than that copy (e.g. a test build's presets, until the repository catches up).
+                var content = await GetConfigFile(PresetsFile, (download, cached) =>
                 {
-                    Presets = (ATISPresets)serializer.Deserialize(reader) ?? new ATISPresets();
+                    var format = ReadPresets(download).FileFormat;
+
+                    if (format > ATISPresets.SupportedFormat) return "it needs a newer plugin";
+
+                    if (cached != null && format < ReadPresets(cached).FileFormat) return "it's older than the copy here";
+
+                    return null;
+                });
+
+                Presets = ReadPresets(content);
+
+                // The profile's own copy is used whatever its format, but an old or new one may not do all it should.
+                if (ConfigFiles.IsProfileOwned(PresetsFile))
+                {
+                    if (Presets.FileFormat < ATISPresets.SupportedFormat)
+                    {
+                        Errors.Add(new Exception($"The profile's {PresetsFile} is older than this plugin expects, so some presets features may not work."), DisplayName);
+                    }
+                    else if (Presets.FileFormat > ATISPresets.SupportedFormat)
+                    {
+                        Errors.Add(new Exception($"The profile's {PresetsFile} is for a newer version of this plugin, so some presets may not work."), DisplayName);
+                    }
                 }
             }
             catch (Exception ex)
@@ -289,7 +297,7 @@ namespace ATISPlugin
         {
             try
             {
-                var response = await GetConfigFile(CodesFile);
+                var response = await GetConfigFile(CodesFile, ValidateList<CodeBlock>);
 
                 var codeBlocks = JsonConvert.DeserializeObject<CodeBlock[]>(response);
 
@@ -309,7 +317,7 @@ namespace ATISPlugin
         {
             try
             {
-                var response = await GetConfigFile(ZuluFile);
+                var response = await GetConfigFile(ZuluFile, ValidateList<ZuluInfo>);
 
                 var zuluInfo = JsonConvert.DeserializeObject<ZuluInfo[]>(response);
 
@@ -328,7 +336,7 @@ namespace ATISPlugin
         {
             try
             {
-                var response = await GetConfigFile(OFCWFile);
+                var response = await GetConfigFile(OFCWFile, ValidateList<OFCWInfo>);
 
                 var ofcwInfo = JsonConvert.DeserializeObject<OFCWInfo[]>(response);
 
