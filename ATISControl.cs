@@ -1,5 +1,6 @@
 ﻿using NAudio.Utils;
 using NAudio.Wave;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -256,7 +257,7 @@ namespace ATISPlugin
 
             var started = DateTime.UtcNow;
 
-            DateTime? connectedUtc = null;
+            ConnectedSinceUtc = null;
 
             try
             {
@@ -269,20 +270,23 @@ namespace ATISPlugin
 
                     if (Network.GetATISConnected(Index))
                     {
-                        if (connectedUtc == null) connectedUtc = DateTime.UtcNow;
+                        if (ConnectedSinceUtc == null) ConnectedSinceUtc = DateTime.UtcNow;
+
+                        // A broadcast waiting for the connection to be confirmed goes to ozserver once it is.
+                        TryPush();
 
                         continue;
                     }
 
                     string message;
 
-                    if (connectedUtc == null)
+                    if (ConnectedSinceUtc == null)
                     {
                         if (DateTime.UtcNow - started < ConnectTimeout) continue;
 
                         message = $"Could not connect {callsign} to the network. Check it isn't already online.";
                     }
-                    else if (DateTime.UtcNow - connectedUtc.Value < RefusedWithin)
+                    else if (DateTime.UtcNow - ConnectedSinceUtc.Value < RefusedWithin)
                     {
                         message = $"The network refused {callsign}. It's most likely already online.";
                     }
@@ -304,9 +308,155 @@ namespace ATISPlugin
             }
         }
 
+        // When the ATIS connection was first seen up, since it was created. Null until then.
+        private DateTime? ConnectedSinceUtc { get; set; }
+
+        // ozserver takes whatever it's sent, so a broadcast is only sent once the plugin has checked it: on the live
+        // network as valid ATC, with the ATIS connected long enough that the network hasn't refused it (a refusal
+        // comes within a second or two), under its own callsign, with a letter and something to say.
+        private static readonly TimeSpan PushConfirmAfter = TimeSpan.FromSeconds(10);
+
+        // The broadcast waiting to be sent, built when it went out on the network. Null when there's none.
+        private JObject PendingPush { get; set; }
+
+        // The last body sent, so the same one isn't sent twice. Null until something is sent. Nothing is sent when
+        // the ATIS goes: the next one pushed for the airport replaces it on ozserver.
+        private string PushedBody { get; set; }
+
+        private static readonly Regex IcaoRegex = new Regex("^[A-Z]{4}$");
+
+        // Called just after the ATIS goes out on the network. Sent now if it checks out, or once the connection is
+        // confirmed while it's still new. A later broadcast replaces one still waiting.
+        private void QueuePush()
+        {
+            try
+            {
+                PendingPush = BuildPush();
+
+                TryPush();
+            }
+            catch
+            {
+                // Only ever an extra: the ATIS is on the network all the same.
+                PendingPush = null;
+            }
+        }
+
+        private void TryPush()
+        {
+            try
+            {
+                var body = PendingPush;
+
+                if (body == null) return;
+
+                var ready = CanPush(body);
+
+                if (ready == null) return;
+
+                PendingPush = null;
+
+                if (ready == false) return;
+
+                var json = body.ToString(Newtonsoft.Json.Formatting.None);
+
+                if (json == PushedBody) return;
+
+                PushedBody = json;
+
+                ATISPush.Put((string)body["icao"], body);
+            }
+            catch
+            {
+                PendingPush = null;
+            }
+        }
+
+        // True to send, false never to (off the live network, or no longer this ATIS), null to wait for the
+        // connection to be confirmed.
+        private bool? CanPush(JObject body)
+        {
+            // Deleted, or replaced by another ATIS, since it was built.
+            if (ICAO == null || (string)body["icao"] != ICAO || (string)body["callsign"] != Callsign) return false;
+
+            if (!SavedATIS.Available || !Network.IsValidATC || !LetterBroadcast) return false;
+
+            if (!Network.GetATISConnected(Index) || ConnectedSinceUtc == null) return null;
+
+            if (DateTime.UtcNow - ConnectedSinceUtc.Value < PushConfirmAfter) return null;
+
+            return true;
+        }
+
+        // The broadcast as ozserver takes it, the same shape as it gives back. Null when it isn't fit to send.
+        private JObject BuildPush()
+        {
+            if (ICAO == null || !IcaoRegex.IsMatch(ICAO) || Callsign != $"{ICAO}_ATIS") return null;
+
+            if (ID < 'A' || ID > 'Z') return null;
+
+            var cid = Network.ControllerId?.Trim();
+            var callsign = Network.Callsign?.Trim().ToUpperInvariant();
+
+            if (string.IsNullOrEmpty(cid) || !cid.All(char.IsDigit) || string.IsNullOrEmpty(callsign)) return null;
+
+            JToken content;
+
+            var changed = new JArray();
+
+            if (IsZulu)
+            {
+                var text = Lines.FirstOrDefault(x => x.Name == "ZULU")?.Value?.Trim();
+
+                if (string.IsNullOrEmpty(text)) return null;
+
+                content = text;
+            }
+            else
+            {
+                var fields = new JObject();
+
+                var filled = 0;
+
+                foreach (var line in Lines.Where(x => x.Name != "OFCW_NOTIFY" && x.Name != "ZULU"))
+                {
+                    var value = line.Value?.Trim();
+
+                    fields[line.Name] = string.IsNullOrEmpty(value) ? JValue.CreateNull() : new JValue(value.ToUpperInvariant());
+
+                    if (!string.IsNullOrEmpty(value)) filled++;
+
+                    if (line.Changed && !string.IsNullOrEmpty(value)) changed.Add(line.Name);
+                }
+
+                if (filled == 0) return null;
+
+                content = fields;
+            }
+
+            return new JObject
+            {
+                ["icao"] = ICAO,
+                ["callsign"] = Callsign,
+                ["atis_letter"] = ID.ToString(),
+                ["type"] = IsZulu ? "zulu" : "atis",
+                ["frequency"] = Frequency == 0 ? null : (Frequency / 1000000.0).ToString("0.000", CultureInfo.InvariantCulture),
+                ["issued"] = DateTime.SpecifyKind(DateTimeUtc, DateTimeKind.Utc).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
+                ["content"] = content,
+                ["changed"] = changed,
+                ["controller"] = new JObject { ["callsign"] = callsign, ["cid"] = cid },
+                ["client"] = ATISPush.Client
+            };
+        }
+
         public async Task Delete()
         {
             ConnectionWatch++;
+
+            // Nothing goes to ozserver: what was last pushed stays there for the next controller to carry on from.
+            PendingPush = null;
+            PushedBody = null;
+            ConnectedSinceUtc = null;
 
             await BroadcastStop();
 
@@ -458,6 +608,8 @@ namespace ATISPlugin
                 Network.UpdateATIS(Index, ID, GetInfo());
 
                 LetterBroadcast = true;
+
+                QueuePush();
 
                 BroadcastAudio();
             }
@@ -780,6 +932,8 @@ namespace ATISPlugin
                     Network.UpdateATIS(Index, ID, GetInfo());
 
                     LetterBroadcast = true;
+
+                    QueuePush();
 
                     return;
                 }

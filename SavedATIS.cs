@@ -12,15 +12,15 @@ namespace ATISPlugin
     // from it. Each section of its content is one ATIS field, named as in the editor (RWY, APCH, OPR INFO...).
     public class SavedATIS
     {
-        private const string Url = "https://api.ozserver.org/api/v1/vatsim/atis/";
+        internal const string Url = "https://api.ozserver.org/api/v1/vatsim/atis/";
 
         // Long enough for the API to answer, short enough that a slow one doesn't hold up the runway mode.
-        private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
+        internal static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
 
         // Older than this, the runways and procedures are likely to have changed, so it isn't offered.
         public static readonly TimeSpan MaxAge = TimeSpan.FromHours(3);
 
-        private static readonly HttpClient Client = new HttpClient();
+        internal static readonly HttpClient Client = new HttpClient();
 
         public string ICAO { get; private set; }
         public char? Letter { get; private set; }
