@@ -229,6 +229,11 @@ namespace ATISPlugin
 
         public bool IsTimed => !string.IsNullOrWhiteSpace(Hours) || IsLinked;
 
+        // Whether the mode can be picked now: in its season, and not ruled out by the other airport's ATIS. With no
+        // ATIS known for that airport it can be (e.g. YSWS RRO with no YSSY ATIS, or YSSY on curfew).
+        public bool IsOffered(DateTime utcNow, TimeZoneInfo timeZone) =>
+            AppliesAt(utcNow, timeZone) && (!IsLinked || AirportCondition.Check(Airport, AirportField, Contains) != false);
+
         private static readonly Regex HoursRegex = new Regex("^(\\d{2})(\\d{2})-(\\d{2})(\\d{2})$");
 
         // Whether it's the mode's season. Without the airport's time zone, both seasons' modes are offered.

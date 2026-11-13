@@ -256,8 +256,9 @@ namespace ATISPlugin
 
         private List<PresetMode> Modes { get; set; } = new List<PresetMode>();
 
-        // The modes offered now: not those for the other season (e.g. AEST curfew wording during AEDT), except the
-        // selected mode, which stays listed if the season changes while it's in use.
+        // The modes offered now: not those for the other season (e.g. AEST curfew wording during AEDT), or those
+        // another airport's ATIS rules out (YSWS RRO while YSSY isn't on curfew), except the selected mode, which
+        // stays listed while it's in use.
         private List<PresetMode> VisibleModes
         {
             get
@@ -266,7 +267,7 @@ namespace ATISPlugin
 
                 var utcNow = DateTime.UtcNow;
 
-                return Modes.Where(x => x.Name == Mode || x.AppliesAt(utcNow, timeZone)).ToList();
+                return Modes.Where(x => x.Name == Mode || x.IsOffered(utcNow, timeZone)).ToList();
             }
         }
 

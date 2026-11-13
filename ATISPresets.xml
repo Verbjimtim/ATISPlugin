@@ -56,6 +56,8 @@
              not held here), an AutoAdd is left as it is, and a Mode goes by its Hours alone (without Hours, it's
              out of period). With Hours as well, a Mode is in period only within them and while the other ATIS
              matches.
+             A Mode the other ATIS rules out isn't offered in the MODE list (unless it's the selected mode, when
+             leaving it is suggested); with no ATIS known for that airport it can still be picked.
 
   APCH options EXP INST APCH, EXP ILS APCH, EXP GLS APCH and EXP RNP APCH are built in for airports that don't
   list any APCH values (as presets or in a mode), and a blank APCH is offered everywhere. With no runway mode

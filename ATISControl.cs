@@ -472,6 +472,7 @@ namespace ATISPlugin
             SuggestedMode = null;
             LinkedReasons.Clear();
             TimedModesInPeriod = null;
+            LinkedModeSuggestions.Clear();
             FrequencyDisplay = null;
             Frequency = 0;
             AliasFrequency = 0;
@@ -1243,6 +1244,9 @@ namespace ATISPlugin
         // The runway mode suggested by CheckTimedModes, with its fields in SuggestedLines, until saved or cancelled.
         public string SuggestedMode { get; set; }
 
+        // Mode changes suggested from another airport's ATIS, by mode and that ATIS, so each is suggested once.
+        private readonly HashSet<string> LinkedModeSuggestions = new HashSet<string>();
+
         // The timed modes (curfew, RRO) within their hours at the last check, to spot hours starting and ending.
         private string TimedModesInPeriod { get; set; }
 
@@ -1264,8 +1268,12 @@ namespace ATISPlugin
 
             TimedModesInPeriod = inPeriod;
 
-            // The first check only records the hours; the mode picked on creation already allows for them.
-            if (previous == null || previous == inPeriod) return false;
+            // The first check only records the hours; the mode picked on creation already allows for them. A mode
+            // that depends on another airport's ATIS is checked against it every time as well, as that ATIS may
+            // already say otherwise (e.g. RRO picked, or kept, while YSSY isn't on curfew).
+            var changed = previous != null && previous != inPeriod;
+
+            if (!changed && !modes.Any(x => x.IsLinked)) return false;
 
             var surfaceLine = Lines.FirstOrDefault(x => x.Name == SurfaceCondition.Field);
 
@@ -1284,6 +1292,17 @@ namespace ATISPlugin
             var fromTimed = current != null && current.IsTimed && !current.InPeriod(utcNow, timeZone);
 
             if (!toTimed && !fromTimed) return false;
+
+            if (!changed)
+            {
+                // Only on the other airport's word, not on a guess while it isn't known, and once for each of its
+                // ATISs: cancelled, or saved anyway, it isn't suggested again until that ATIS changes.
+                var linked = toTimed && best.IsLinked ? best : fromTimed && current.IsLinked ? current : null;
+
+                if (linked == null || AirportCondition.Check(linked.Airport, linked.AirportField, linked.Contains) == null) return false;
+
+                if (!LinkedModeSuggestions.Add($"MODE={best.Name}|{AirportCondition.Reason(linked.Airport, linked.AirportField)}")) return false;
+            }
 
             foreach (var field in best.Fields)
             {
