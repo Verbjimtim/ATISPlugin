@@ -47,6 +47,16 @@
              AboveCrosswind (on the Runways given, otherwise on any runway in RWY). Checked when WIND, RWY or
              MODE changes.
 
+  Airport="YPPH" AirportField="RWY" Contains="03" on <AutoAdd> or <Mode> depends on another airport's ATIS:
+             met while that airport's AirportField has Contains in it, as whole words ("03" isn't found in "1030";
+             alternatives separated by |). The other ATIS is read from this plugin when the controller holds it,
+             otherwise from ozserver (live network only), and checked every minute. A change is suggested (amber,
+             with the reason when the field name is pointed at), never made by itself.
+             While the other ATIS isn't known (offline, older than 3 hours, a Zulu, or off the live network and
+             not held here), an AutoAdd is left as it is, and a Mode goes by its Hours alone (without Hours, it's
+             out of period). With Hours as well, a Mode is in period only within them and while the other ATIS
+             matches.
+
   APCH options EXP INST APCH, EXP ILS APCH, EXP GLS APCH and EXP RNP APCH are built in for airports that don't
   list any APCH values (as presets or in a mode), and a blank APCH is offered everywhere. With no runway mode
   selected, RWY also offers each runway.
@@ -379,8 +389,9 @@
       <Field Name="APCH">EXP INST APCH</Field>
       <Field Name="RWY">05</Field>
     </Mode>
-    <!-- Permitted between 2300 and 0530 local when YSSY curfew is in use: arrivals 05, departures 23. -->
-    <Mode Name="RRO" Hours="2300-0530" Runways="05,23">
+    <!-- Permitted between 2300 and 0530 local when YSSY curfew is in use: arrivals 05, departures 23. Suggested
+         while YSSY's ATIS has its curfew in operation; by the hours alone when YSSY's ATIS isn't known. -->
+    <Mode Name="RRO" Hours="2300-0530" Runways="05,23" Airport="YSSY" AirportField="OPR INFO" Contains="CURFEW IN OPERATION">
       <Field Name="APCH">EXP INST APCH</Field>
       <Field Name="RWY">05 FOR ARR. RWY 23 FOR DEP</Field>
     </Mode>
@@ -525,6 +536,7 @@
     <Presets Field="OPR INFO" Multiple="true">
       <Preset>DUE YPPH DUTY RWY 03, CAUTION WAKE TURB</Preset>
     </Presets>
+    <AutoAdd Field="OPR INFO" Airport="YPPH" AirportField="RWY" Contains="03">DUE YPPH DUTY RWY 03, CAUTION WAKE TURB</AutoAdd>
   </Airport>
 
   <Airport ICAO="YMMB" SingleRunwayFormat="ALL OPERATIONS RWY {RWY}" ReportCrosswindFrom="5">

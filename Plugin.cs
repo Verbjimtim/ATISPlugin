@@ -148,6 +148,8 @@ namespace ATISPlugin
                 ATIS3.StatusChanged += OnUpdate;
                 ATIS4.StatusChanged += OnUpdate;
 
+                LinkedATIS.Held = () => AllATIS.ToList();
+
                 BroadcastTimer.Elapsed += new ElapsedEventHandler(BroadcastTimer_Elasped);
                 BroadcastTimer.Interval = TimeSpan.FromSeconds(5).TotalMilliseconds;
                 BroadcastTimer.AutoReset = false;
@@ -176,6 +178,19 @@ namespace ATISPlugin
             _ = GetCodeBlocks();
 
             _ = GetPresets();
+        }
+
+        // The other airports the open ATISs depend on, by their presets (e.g. YPPH for YPJT).
+        private static IEnumerable<string> LinkedAirports()
+        {
+            if (Presets == null) return Enumerable.Empty<string>();
+
+            return AllATIS.Where(x => x.ICAO != null && !x.IsZulu)
+                .Select(x => Presets.GetAirport(x.ICAO))
+                .Where(x => x != null)
+                .SelectMany(x => x.AutoAdds.Where(a => a.IsLinked).Select(a => a.Airport)
+                    .Concat(x.Modes.Where(m => m.IsLinked).Select(m => m.Airport)))
+                .ToList();
         }
 
         private static IEnumerable<ATISControl> AllATIS => new[] { ATIS1, ATIS2, ATIS3, ATIS4 }.Where(x => x != null);
@@ -422,6 +437,19 @@ namespace ATISPlugin
         {
             try
             {
+                // Read again for the next check, and checked again as soon as one has changed.
+                LinkedATIS.Refresh(LinkedAirports(), () =>
+                {
+                    try
+                    {
+                        MMI.InvokeOnGUI(delegate () { CheckTimedUpdates(); });
+                    }
+                    catch
+                    {
+                        // Checked at the next minute instead.
+                    }
+                });
+
                 foreach (var atis in AllATIS)
                 {
                     if (atis.CheckTimedUpdates(DateTime.UtcNow)) OnMETARUpdate(atis.Number, true);

@@ -212,7 +212,22 @@ namespace ATISPlugin
         [XmlAttribute]
         public string DaylightSaving { get; set; }
 
-        public bool IsTimed => !string.IsNullOrWhiteSpace(Hours);
+        // Another airport's ATIS the mode is for, e.g. Airport="YSSY" AirportField="OPR INFO" Contains="CURFEW" for
+        // YSWS RRO while YSSY is on curfew. The mode is then timed: in period while that ATIS matches (and within
+        // Hours, if given). While that ATIS isn't known, Hours decide alone, or without Hours it's out of period.
+        [XmlAttribute]
+        public string Airport { get; set; }
+
+        [XmlAttribute]
+        public string AirportField { get; set; }
+
+        // Text to find in AirportField, as whole words; alternatives separated by |.
+        [XmlAttribute]
+        public string Contains { get; set; }
+
+        public bool IsLinked => AirportCondition.IsSet(Airport);
+
+        public bool IsTimed => !string.IsNullOrWhiteSpace(Hours) || IsLinked;
 
         private static readonly Regex HoursRegex = new Regex("^(\\d{2})(\\d{2})-(\\d{2})(\\d{2})$");
 
@@ -228,7 +243,25 @@ namespace ATISPlugin
 
         public bool InPeriod(DateTime utcNow, TimeZoneInfo timeZone)
         {
-            if (!IsTimed || timeZone == null) return false;
+            if (!IsTimed) return false;
+
+            if (IsLinked)
+            {
+                var linked = AirportCondition.Check(Airport, AirportField, Contains);
+
+                if (linked == false) return false;
+
+                if (string.IsNullOrWhiteSpace(Hours)) return linked == true && AppliesAt(utcNow, timeZone);
+
+                // Unknown: the hours alone, as before the other airport could be read.
+            }
+
+            return InHours(utcNow, timeZone);
+        }
+
+        private bool InHours(DateTime utcNow, TimeZoneInfo timeZone)
+        {
+            if (string.IsNullOrWhiteSpace(Hours) || timeZone == null) return false;
 
             var match = HoursRegex.Match(Hours.Trim());
 
@@ -289,8 +322,34 @@ namespace ATISPlugin
         [XmlAttribute]
         public int AboveCrosswind { get; set; }
 
+        // Another airport's ATIS to match, e.g. Airport="YPPH" AirportField="RWY" Contains="03". While that ATIS
+        // isn't known, the text is neither added nor removed.
+        [XmlAttribute]
+        public string Airport { get; set; }
+
+        [XmlAttribute]
+        public string AirportField { get; set; }
+
+        // Text to find in AirportField, as whole words; alternatives separated by |.
+        [XmlAttribute]
+        public string Contains { get; set; }
+
+        public bool IsLinked => AirportCondition.IsSet(Airport);
+
         [XmlText]
         public string Text { get; set; }
+
+        // Applies with the other airport's ATIS too: null when that's needed and isn't known.
+        public bool? AppliesNow(string mode, ICollection<string> runwaysInUse, ATISPlugin.Wind wind, Func<string, double> heading)
+        {
+            if (!IsLinked) return Applies(mode, runwaysInUse, wind, heading);
+
+            var linked = AirportCondition.Check(Airport, AirportField, Contains);
+
+            if (linked == null) return null;
+
+            return linked.Value && Applies(mode, runwaysInUse, wind, heading);
+        }
 
         private static readonly Regex DirectionsRegex = new Regex("^(\\d{3})-(\\d{3})$");
 

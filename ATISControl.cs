@@ -470,6 +470,7 @@ namespace ATISPlugin
             TimedSuggestionsMade.Clear();
             RunwayChangeAlerted = null;
             SuggestedMode = null;
+            LinkedReasons.Clear();
             TimedModesInPeriod = null;
             FrequencyDisplay = null;
             Frequency = 0;
@@ -551,6 +552,7 @@ namespace ATISPlugin
             SuggestedLines.Clear();
 
             SuggestedMode = null;
+            LinkedReasons.Clear();
 
             TimedSuggestionsMade.Clear();
 
@@ -745,6 +747,7 @@ namespace ATISPlugin
             SuggestedLines.Clear();
 
             SuggestedMode = null;
+            LinkedReasons.Clear();
 
             SavedLetter = null;
         }
@@ -1131,6 +1134,59 @@ namespace ATISPlugin
 
             added |= CheckTimedModes(utcNow);
 
+            added |= CheckLinkedAutoAdds();
+
+            return added;
+        }
+
+        // Why a field was suggested from another airport's ATIS, by field name (MODE for a runway mode), e.g.
+        // "YPPH ATIS K (ozserver): RWY 03". Cleared with the suggestions.
+        public Dictionary<string, string> LinkedReasons { get; } = new Dictionary<string, string>();
+
+        // Suggests adding or removing AutoAdd text that depends on another airport's ATIS as that ATIS changes (e.g.
+        // YPJT's wake turbulence caution while YPPH uses runway 03). Nothing while that ATIS isn't known, so losing
+        // it doesn't take the text away. Each change is suggested once until the next save.
+        private bool CheckLinkedAutoAdds()
+        {
+            var presetAirport = Plugin.Presets?.GetAirport(ICAO);
+
+            if (presetAirport == null || !presetAirport.AutoAdds.Any(x => x.IsLinked)) return false;
+
+            var added = false;
+
+            string Current(ATISLine line) => SuggestedLines.FirstOrDefault(x => x.Name == line.Name)?.Value ?? line.Value ?? string.Empty;
+
+            var windLine = Lines.FirstOrDefault(x => x.METARField == METARField.Wind);
+            var runwayLine = Lines.FirstOrDefault(x => x.Name == "RWY");
+
+            var wind = windLine == null ? null : Wind.Parse(Current(windLine));
+
+            var runways = runwayLine == null ? new List<string>() : Wind.RunwaysInUse(Current(runwayLine));
+
+            var mode = SuggestedMode ?? Mode;
+
+            foreach (var autoAdd in presetAirport.AutoAdds.Where(x => x.IsLinked))
+            {
+                var line = Lines.FirstOrDefault(x => x.Name == autoAdd.Field);
+
+                var text = PresetAirport.Clean(autoAdd.Text);
+
+                if (line == null || text.Length == 0) continue;
+
+                var applies = autoAdd.AppliesNow(mode, runways, wind, runway => EditorWindow.RunwayHeading(ICAO, runway));
+
+                var current = Current(line);
+
+                if (applies == null || applies.Value == EditorWindow.ContainsPreset(current, text)) continue;
+
+                if (SuggestTimed(line, EditorWindow.TogglePreset(current, text)))
+                {
+                    LinkedReasons[line.Name] = AirportCondition.Reason(autoAdd.Airport, autoAdd.AirportField);
+
+                    added = true;
+                }
+            }
+
             return added;
         }
 
@@ -1245,6 +1301,10 @@ namespace ATISPlugin
             }
 
             SuggestedMode = best.Name;
+
+            var linkedMode = new[] { best, current }.FirstOrDefault(x => x != null && x.IsLinked);
+
+            if (linkedMode != null) LinkedReasons["MODE"] = AirportCondition.Reason(linkedMode.Airport, linkedMode.AirportField);
 
             SuggestionsVersion++;
 
