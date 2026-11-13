@@ -2651,7 +2651,9 @@ namespace ATISPlugin
                 atis = Zulu.Fill(atis, contact);
             }
 
-            zuluLine.Value = atis;
+            // An edit waiting to be saved, like one typed in, so Save is offered. Writing it to the line itself made
+            // it look already saved.
+            Saves[zuluLine.Name] = atis;
 
             TextBoxZulu.Text = atis;
         }
