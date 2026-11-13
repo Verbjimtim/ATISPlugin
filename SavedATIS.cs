@@ -89,12 +89,14 @@ namespace ATISPlugin
             }
         }
 
-        // The API answers with a list, empty when nothing is saved for the airport.
+        // The API answers with the airport's record, or a list of records (empty when nothing is saved for it).
         public static SavedATIS Parse(string json, string icao, DateTime? utcNow = null)
         {
-            if (!(JToken.Parse(json) is JArray list)) return null;
+            var token = JToken.Parse(json);
 
-            var item = list.OfType<JObject>().FirstOrDefault(x => string.Equals((string)x["icao"], icao, StringComparison.OrdinalIgnoreCase));
+            var items = token is JArray list ? list.OfType<JObject>() : token is JObject single ? new[] { single } : Enumerable.Empty<JObject>();
+
+            var item = items.FirstOrDefault(x => string.Equals((string)x["icao"], icao, StringComparison.OrdinalIgnoreCase));
 
             if (item == null) return null;
 
@@ -135,7 +137,8 @@ namespace ATISPlugin
                 }
             }
 
-            var updated = item["last_updated"];
+            // Called last_updated before, issued now. Either a DDHHMM(Z) time group or a full date.
+            var updated = new[] { item["last_updated"], item["issued"] }.FirstOrDefault(x => x != null && x.Type != JTokenType.Null);
 
             if (updated != null && updated.Type == JTokenType.Date)
             {
